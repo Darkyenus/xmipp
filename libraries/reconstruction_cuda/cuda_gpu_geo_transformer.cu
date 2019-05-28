@@ -36,12 +36,18 @@ void applyGeometryKernel_2D_wrap(const T* trInv, T minxpp, T maxxpp, T minypp,
 
         switch (degree) {
         case 0:
-        case 1:
         case 2:
             assert("degree 0..2 not implemented");
             break;
         case 3: {
 			T res = interpolatedElementBSpline2D_Degree3(xp, yp, coefsXDim,
+                    coefsYDim, coefs);
+            size_t index = i * xdim + j;
+            data[index] = res;
+        }
+            break;
+        case 1: {
+            T res = interpolatedElementBSpline2D_Degree1(xp, yp, coefsXDim,
                     coefsYDim, coefs);
             size_t index = i * xdim + j;
             data[index] = res;

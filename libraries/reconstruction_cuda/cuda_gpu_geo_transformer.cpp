@@ -269,6 +269,14 @@ void GeoTransformer<T>::applyGeometry_2D_wrap(int splineDegree) {
             d_out, (int)inX, (int)inY, d_in, (int)inX, (int)inY);
         gpuErrchk(cudaPeekAtLastError());
         break;
+
+    case 1:
+        applyGeometryKernel_2D_wrap<T, 1, true><<<dimGrid, dimBlock>>>(d_trInv,
+            minxpp, maxxpp, minypp, maxypp,
+            minxp, maxxp, minyp, maxyp,
+            d_out, (int)inX, (int)inY, d_in, (int)inX, (int)inY);
+        gpuErrchk(cudaPeekAtLastError());
+        break;
     default:
         throw std::logic_error("not implemented");
     }

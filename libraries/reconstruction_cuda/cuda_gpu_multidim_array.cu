@@ -26,6 +26,54 @@
 #ifndef CUDA_GPU_MUTLIDIM_ARRAY_CU
 #define CUDA_GPU_MUTLIDIM_ARRAY_CU
 
+template<typename T>
+__device__
+T interpolatedElementBSpline2D_Degree1(T x, T y, int xdim, int ydim, const T* data)
+{
+    T wx = x;
+    int m1 = (int) wx;
+    wx = wx - m1;
+    int m2 = m1 + 1;
+    T wy = y;
+    int n1 = (int) wy;
+    wy = wy - n1;
+    int n2 = n1 + 1;
+
+    // m2 and n2 can be out by 1 so wrap must be check here
+    if ((m2 >= 0) && (m2 >= xdim)) {
+        m2 = 0;
+    }
+    if ((n2 >=0) && (n2 >= ydim)) {
+        n2 = 0;
+    }
+
+    // Perform interpolation
+    // if wx == 0 means that the rightest point is useless
+    // for this interpolation, and even it might not be
+    // defined if m1=xdim-1
+    // The same can be said for wy.
+    T wx_1 = (1-wx);
+    T wy_1 = (1-wy);
+    T aux2=wy_1* wx_1;
+    T tmp = aux2 * data[n1 * xdim + m1];
+
+    if ((wx != 0) && ((m2 < 0) || ((size_t)m2 < xdim))) {
+        tmp += (wy_1-aux2) * data[n1 * xdim + m2];
+    }
+
+    if ((wy != 0) && ((n2 < 0) || ((size_t)n2 < ydim)))
+    {
+        aux2=wy * wx_1;
+        tmp += aux2 * data[n2 * xdim + m1];
+
+        if ((wx != 0) && ((m2 < 0) || ((size_t)m2 < xdim))) {
+            tmp += (wy-aux2) * data[n2 * xdim + m2];
+        }
+    }
+
+    return tmp;
+}
+
 #define LOOKUP_TABLE_LEN 6
 
 template<typename T>
@@ -185,7 +233,6 @@ T interpolatedElementBSpline2D_Degree3MorePixelsEdge(T x, T y, int xdim, int ydi
         ref = data + (equivalent_m * xdim);
         #pragma unroll
         for ( int j = 0; j < 4; ++j ) {
-            const int l = l1 + j;
             int equivalent_l = equivalent_l_Array[j];
             rows += ref[equivalent_l] * aux_Array[j];
         }
