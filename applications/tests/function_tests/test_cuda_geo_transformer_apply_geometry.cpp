@@ -254,7 +254,7 @@ REGISTER_TYPED_TEST_CASE_P(GeoTransformerApplyGeometryTest,
 );
 
 using TestTypes = ::testing::Types< TypeDefinitions<float, 3>, TypeDefinitions<double, 3>,
-                        TypeDefinitions<float, 1>, TypeDefinitions<double, 1> >;
+                    TypeDefinitions<float, 1>, TypeDefinitions<double, 1> >;
 INSTANTIATE_TYPED_TEST_CASE_P(TestTypesInstantiation, GeoTransformerApplyGeometryTest, TestTypes);
 
 GTEST_API_ int main(int argc, char **argv)

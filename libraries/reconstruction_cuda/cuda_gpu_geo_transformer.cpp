@@ -54,8 +54,15 @@ void GeoTransformer<T>::initForMatrix(size_t x, size_t y, size_t z) {
     inZ = z;
     size_t matSize = (0 == z) ? 9 : 16;
     gpuErrchk(cudaMalloc((void** ) &d_trInv, matSize * sizeof(T)));
-    gpuErrchk(cudaMalloc((void** ) &d_in, x * y * z * sizeof(T)));
-    gpuErrchk(cudaMalloc((void** ) &d_out, x * y * z * sizeof(T)));
+
+    // padding for produceAndLoadCoeffs; Y dimension has to be a multiple of BLOCK_SIZE
+    const int BLOCK_SIZE = iirConvolve2D_Cardinal_BSpline_3_MirrorOffBoundKernels::BLOCK_SIZE;
+    const int Y_padded = (inY / BLOCK_SIZE) * BLOCK_SIZE + BLOCK_SIZE * (inY % BLOCK_SIZE != 0);
+    size_t inOutSize = inX * inY;
+    size_t inOutSize_padded = inX* Y_padded;
+
+    gpuErrchk(cudaMalloc((void** ) &d_in, inOutSize_padded * z * sizeof(T)));
+    gpuErrchk(cudaMalloc((void** ) &d_out, inOutSize * z * sizeof(T)));
 
     isReadyForMatrix = true;
 }
