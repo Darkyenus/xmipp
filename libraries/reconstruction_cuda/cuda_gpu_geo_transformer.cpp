@@ -105,48 +105,6 @@ void GeoTransformer<T>::initLazyForBSpline(size_t inX, size_t inY, size_t inZ,
 }
 
 template<typename T>
-void GeoTransformer<T>::test() {
-    Matrix1D<T> shift(2);
-    shift.vdata[0] = 0.45;
-    shift.vdata[1] = 0.62;
-    Matrix2D<T> transform;
-    translation2DMatrix(shift, transform, true);
-    test(transform);
-}
-
-template<typename T>
-void GeoTransformer<T>::test(const Matrix2D<T> &transform) {
-    MultidimArray<T> resGpu, resCpu;
-    MultidimArray<T> input(32, 32);
-    for (int i = 0; i < input.ydim; ++i) {
-        for (int j = 0; j < input.xdim; ++j) {
-            input.data[i * input.xdim + j] = i * 10 + j;
-        }
-    }
-
-    this->initForMatrix(input.xdim, input.ydim, input.zdim);
-    this->applyGeometry(3, resGpu, input, transform, false, true);
-    ::applyGeometry(3, resCpu, input, transform, false, true);
-
-    bool failed = false;
-    for (int i = 0; i < input.ydim; ++i) {
-        for (int j = 0; j < input.xdim; ++j) {
-            int index = i * input.xdim + j;
-            T gpu = resGpu[index];
-            T cpu = resCpu[index];
-            if (std::abs(cpu - gpu) > 0.001) {
-                failed = true;
-                fprintf(stderr, "error[%d]: GPU %.4f CPU %.4f\n", index, gpu,
-                        cpu);
-            }
-        }
-    }
-
-    fprintf(stderr, "test transform result: %s\n", failed ? "FAIL" : "OK");
-    this->release();
-}
-
-template<typename T>
 void GeoTransformer<T>::applyBSplineTransformRef(
         int splineDegree,
         MultidimArray<T> &output, const MultidimArray<T> &input,
@@ -419,3 +377,11 @@ std::unique_ptr<T[]> GeoTransformer<T>::copy_out_d_in(size_t size) const {
 
 template class GeoTransformer<float>;
 template class GeoTransformer<double>;
+template void GeoTransformer<float>::applyGeometry<float, float>(int,
+        MultidimArray<float> &, const MultidimArray<float> &,
+        const Matrix2D<float> &, bool, bool, float,
+        const MultidimArray<float> *);
+template void GeoTransformer<double>::applyGeometry<double, double>(int,
+        MultidimArray<double> &, const MultidimArray<double> &,
+        const Matrix2D<double> &, bool, bool, double,
+        const MultidimArray<double> *);
