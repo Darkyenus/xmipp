@@ -134,8 +134,6 @@ public:
         MultidimArray<T> &output, const MultidimArray<T> &input,
         const std::pair<Matrix1D<T>, Matrix1D<T>> &coeffs, size_t imageIdx, T outside = 0);
 
-    void test();
-
 private:
     /**
      * Make sure that there's no logical mistake in the transformation
@@ -204,9 +202,6 @@ private:
      * Set default values to all private fields
      */
     void setDefaultValues();
-
-
-    void test(const Matrix2D<T> &transform);
 
     /**
      * Load BSpline interpolation coefficients to GPU
