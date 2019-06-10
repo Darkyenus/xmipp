@@ -194,7 +194,7 @@ void GeoTransformer<T>::applyGeometry(int splineDegree,
     }
 
     loadTransform(transform, isInv);
-    loadOutput(output, outside);
+    setOutputSize(output);
 
     if (splineDegree > 1) {
         if (NULL != bCoeffsPtr) {
