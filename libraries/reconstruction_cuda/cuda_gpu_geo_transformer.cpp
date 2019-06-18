@@ -41,7 +41,8 @@ void GeoTransformer<T>::release() {
 template<typename T>
 void GeoTransformer<T>::setDefaultValues() {
     isReadyForBspline = isReadyForMatrix = false;
-    d_trInv = d_in = d_out = d_coeffsX = d_coeffsY = nullptr;
+    d_in = d_out = d_coeffsX = d_coeffsY = nullptr;
+    d_trInv = nullptr;
     inX = inY = inZ = splineX = splineY = splineN;
 }
 
@@ -53,7 +54,7 @@ void GeoTransformer<T>::initForMatrix(size_t x, size_t y, size_t z) {
     inY = y;
     inZ = z;
     size_t matSize = (0 == z) ? 9 : 16;
-    gpuErrchk(cudaMalloc((void** ) &d_trInv, matSize * sizeof(T)));
+    gpuErrchk(cudaMalloc((void** ) &d_trInv, matSize * sizeof(double)));
 
     // padding for produceAndLoadCoeffs; Y dimension has to be a multiple of BLOCK_SIZE
     const int BLOCK_SIZE = iirConvolve2D_Cardinal_BSpline_3_MirrorOffBoundKernels::BLOCK_SIZE;
@@ -164,17 +165,35 @@ void GeoTransformer<T>::applyBSplineTransform(
     T hT = (splineN == 3) ? inN : (inN / (T) ((splineN - 3)));
     T tPos = imageIdx / hT;
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     switch (splineDegree) {
     case 3:
+        cudaEventRecord(start);
+
         applyLocalShiftGeometryKernelMorePixels<T, 3, pixelsPerThread><<<dimGrid, dimBlock>>>(d_coeffsX, d_coeffsY,
                 d_out, (int)inX, (int)inY, (int)inN,
                 d_in, imageIdx, (int)splineX, (int)splineY, (int)splineN,
                 hX, hY, tPos);
             gpuErrchk(cudaPeekAtLastError());
+
+        cudaEventRecord(stop);
         break;
     default:
         REPORT_ERROR(ERR_NOT_IMPLEMENTED, formatString("applyBSplineTransform not implemented for spline degree %d.", splineDegree));
     }
+
+
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    float speed = static_cast<float>(inX) * static_cast<float>(inY) / milliseconds / 1e3f;
+
+    std::cout << "Speed=" << speed << std::endl;
+
+    speeds.push_back(speed);
 
     gpuErrchk(
             cudaMemcpy(output.data, d_out, output.zyxdim * sizeof(T),
@@ -226,10 +245,10 @@ template<typename T_MAT>
 void GeoTransformer<T>::loadTransform(const Matrix2D<T_MAT> &transform,
         bool isInv) {
     Matrix2D<T_MAT> trInv = isInv ? transform : transform.inv();
-    Matrix2D<T> tmp;
+    Matrix2D<double> tmp;
     typeCast(trInv, tmp);
     gpuErrchk(
-            cudaMemcpy(d_trInv, tmp.mdata, tmp.mdim * sizeof(T),
+            cudaMemcpy(d_trInv, tmp.mdata, tmp.mdim * sizeof(double),
                     cudaMemcpyHostToDevice));
 }
 
@@ -268,6 +287,12 @@ void GeoTransformer<T>::applyGeometry_2D_wrap(int splineDegree) {
     dim3 dimBlock(BLOCK_DIM_X, BLOCK_DIM_X);
     dim3 dimGrid(ceil(inX / (T) dimBlock.x), ceil(inY / (T) dimBlock.y));
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+
     switch (splineDegree) {
     case 3:
         applyGeometryKernel_2D_wrap<T, 3,true><<<dimGrid, dimBlock>>>(d_trInv,
@@ -275,6 +300,8 @@ void GeoTransformer<T>::applyGeometry_2D_wrap(int splineDegree) {
             minxp, maxxp, minyp, maxyp,
             d_out, (int)inX, (int)inY, d_in, (int)inX, (int)inY);
         gpuErrchk(cudaPeekAtLastError());
+
+
         break;
 
     case 1:
@@ -287,6 +314,15 @@ void GeoTransformer<T>::applyGeometry_2D_wrap(int splineDegree) {
     default:
         throw std::logic_error("not implemented");
     }
+
+    cudaEventRecord(stop);
+
+        cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    float speed = static_cast<float>(inX) * static_cast<float>(inY) / milliseconds / 1e3f;
+
+    std::cout << "Speed=" << speed << std::endl;
 }
 
 template<typename T>

@@ -57,6 +57,67 @@ T interpolatedElementBSpline2D_Degree1(T x, T y, int xdim, int ydim, const T* da
     return tmp;
 }
 
+template<typename T>
+__device__
+T interpolatedElementBSpline2D_Degree1New(int x, int y, T x_shift, T y_shift, int xdim, int ydim, const T* data)
+{
+    // int m2 = x + (int)ceil(-x_shift);
+    // int m1 = m2 - 1;
+    // T wx = x - x_shift - m1;
+
+    int m1 = (int)( x - x_shift );
+    T wx = x - x_shift - m1;
+    int m2 = m1 + 1;
+
+    int n1 = static_cast<int>( y - y_shift );
+    T wy = y - y_shift - n1;
+    // T wy = y_shift;
+    int n2 = n1 + 1;
+
+    // m2 and n2 can be out by 1 so wrap must be check here
+    // if ( m2 >= xdim ) {
+    //     m2 = 0;
+    // }
+    // if ( n2 >= ydim ) {
+    //     n2 = 0;
+    // }
+
+    if ( m2 < 0 ) {
+        m2 = -m2-1;
+    } else if ( m2 >= xdim ) {
+        m2 = 2 * xdim - m2 - 1;
+    }
+
+    if ( m1 < 0 ) {
+        m1 = -m1-1;
+    } else if ( m1 >= xdim ) {
+        m1 = 2 * xdim - m1 - 1;
+    }
+
+    if ( n1 < 0 ) {
+        n1 = -n1-1;
+    } else if ( n1 >= ydim ) {
+        n1 = 2 * ydim - n1 - 1;
+    }
+
+    if ( n2 < 0 ) {
+        n2 = -n2-1;
+    } else if ( n2 >= ydim ) {
+        n2 = 2 * ydim - n2 - 1;
+    }
+
+    T wx_1 = 1 - wx;
+    T wy_1 = 1 - wy;
+    T aux2 = wy_1 * wx_1;
+    T tmp = aux2 * data[n1 * xdim + m1];
+    tmp += ( wy_1 - aux2 ) * data[n1 * xdim + m2];
+    aux2 = wy * wx_1;
+    tmp += aux2 * data[n2 * xdim + m1];
+    tmp += ( wy - aux2 ) * data[n2 * xdim + m2];
+
+    return tmp;
+}
+
 #define LOOKUP_TABLE_LEN 6
 
 template<typename T>

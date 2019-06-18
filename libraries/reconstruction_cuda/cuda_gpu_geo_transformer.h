@@ -47,6 +47,8 @@
 #include "reconstruction/gpu_geo_transformer_defines.h"
 #include "cuda_xmipp_utils.h"
 
+#include <numeric>
+
 template<typename T>
 class GeoTransformer {
 
@@ -55,6 +57,10 @@ public:
     GeoTransformer() { setDefaultValues(); };
 
     ~GeoTransformer() {
+        // if ( !speeds.empty() ) {
+            // std::cout << "Average=" << std::accumulate(speeds.begin(), speeds.end(), 0) / speeds.size() << std::endl;
+        // }
+
         release();
     }
 
@@ -240,7 +246,7 @@ private:
     bool isReadyForMatrix;
     bool isReadyForBspline;
 
-    T *d_trInv; // memory on GPU with inverse transformation (dest->src)
+    double *d_trInv; // memory on GPU with inverse transformation (dest->src)
     T *d_in; // memory on GPU with input data
     T *d_out; // memory in GPU with output data
 
@@ -261,6 +267,9 @@ private:
     constexpr static const T transposeTileDim = (T)32;
     constexpr static const T transposeBlockRow = (T)8;
     constexpr static const int pixelsPerThread = 2;
+
+
+    std::vector<float> speeds;
 };
 
 #endif // CUDA_GEO_TRANSFORMER
