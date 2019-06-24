@@ -171,9 +171,22 @@ void GeoTransformer<T>::applyBSplineTransform(
 
     switch (splineDegree) {
     case 3:
+        std::cout << "Interpolation degree=3\n";
         cudaEventRecord(start);
 
         applyLocalShiftGeometryKernelMorePixels<T, 3, pixelsPerThread><<<dimGrid, dimBlock>>>(d_coeffsX, d_coeffsY,
+                d_out, (int)inX, (int)inY, (int)inN,
+                d_in, imageIdx, (int)splineX, (int)splineY, (int)splineN,
+                hX, hY, tPos);
+            gpuErrchk(cudaPeekAtLastError());
+
+        cudaEventRecord(stop);
+        break;
+    case 1:
+        std::cout << "Interpolation degree=1\n";
+        cudaEventRecord(start);
+
+        applyLocalShiftGeometryKernelMorePixels<T, 1, pixelsPerThread><<<dimGrid, dimBlock>>>(d_coeffsX, d_coeffsY,
                 d_out, (int)inX, (int)inY, (int)inN,
                 d_in, imageIdx, (int)splineX, (int)splineY, (int)splineN,
                 hX, hY, tPos);
@@ -277,12 +290,12 @@ template<typename T>
 void GeoTransformer<T>::applyGeometry_2D_wrap(int splineDegree) {
     T minxp = 0;
     T minyp = 0;
-    T minxpp = minxp - XMIPP_EQUAL_ACCURACY;
-    T minypp = minyp - XMIPP_EQUAL_ACCURACY;
+    T minxpp = minxp;
+    T minypp = minyp;
     T maxxp = inX - 1;
     T maxyp = inY - 1;
-    T maxxpp = maxxp + XMIPP_EQUAL_ACCURACY;
-    T maxypp = maxyp + XMIPP_EQUAL_ACCURACY;
+    T maxxpp = maxxp;
+    T maxypp = maxyp;
 
     dim3 dimBlock(BLOCK_DIM_X, BLOCK_DIM_X);
     dim3 dimGrid(ceil(inX / (T) dimBlock.x), ceil(inY / (T) dimBlock.y));

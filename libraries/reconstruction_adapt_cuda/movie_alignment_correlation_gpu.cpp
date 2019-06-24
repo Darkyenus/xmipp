@@ -529,9 +529,9 @@ void ProgMovieAlignmentCorrelationGPU<T>::applyShiftsComputeAverage(
             if (this->fnAligned != "" || this->fnAvg != "") {
                 transformer.initLazyForBSpline(croppedFrame.data.xdim, croppedFrame.data.ydim, alignment.movieDim.n(),
                         this->localAlignmentControlPoints.x(), this->localAlignmentControlPoints.y(), this->localAlignmentControlPoints.n());
-                transformer.applyBSplineTransform(this->BsplineOrder, shiftedFrame(), croppedFrame(), coeffs, frameOffset);
-
-
+                // transformer.applyBSplineTransform(this->BsplineOrder, shiftedFrame(), croppedFrame(), coeffs, frameOffset);
+                transformer.applyBSplineTransform(1, shiftedFrame(), croppedFrame(), coeffs, frameOffset);
+                
                 if (this->fnAligned != "")
                     shiftedFrame.write(this->fnAligned, frameOffset + 1, true,
                             WRITE_REPLACE);

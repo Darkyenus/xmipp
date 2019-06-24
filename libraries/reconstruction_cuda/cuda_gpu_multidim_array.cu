@@ -37,12 +37,28 @@ T interpolatedElementBSpline2D_Degree1(T x, T y, int xdim, int ydim, const T* da
     T wy = y - n1;
     int n2 = n1 + 1;
 
-    // m2 and n2 can be out by 1 so wrap must be check here
-    if ( m2 >= xdim ) {
-        m2 = 0;
+    if ( m2 < 0 ) {
+        m2 = -m2-1;
+    } else if ( m2 >= xdim ) {
+        m2 = 2 * xdim - m2 - 1;
     }
-    if ( n2 >= ydim ) {
-        n2 = 0;
+
+    if ( m1 < 0 ) {
+        m1 = -m1-1;
+    } else if ( m1 >= xdim ) {
+        m1 = 2 * xdim - m1 - 1;
+    }
+
+    if ( n1 < 0 ) {
+        n1 = -n1-1;
+    } else if ( n1 >= ydim ) {
+        n1 = 2 * ydim - n1 - 1;
+    }
+
+    if ( n2 < 0 ) {
+        n2 = -n2-1;
+    } else if ( n2 >= ydim ) {
+        n2 = 2 * ydim - n2 - 1;
     }
 
     T wx_1 = 1 - wx;

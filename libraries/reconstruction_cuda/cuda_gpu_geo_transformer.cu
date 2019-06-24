@@ -91,8 +91,8 @@ void applyGeometryKernel_2D_wrap(const double* trInv, T minxpp, T maxxpp, T miny
             yp = realWRAP(yp, minyp - 0.5, maxyp + 0.5);
         }
 
-        T x_shift = j - xp;
-        T y_shift = i - yp;
+        // T x_shift = j - xp;
+        // T y_shift = i - yp;
 
 
         switch (degree) {
@@ -104,15 +104,17 @@ void applyGeometryKernel_2D_wrap(const double* trInv, T minxpp, T maxxpp, T miny
             break;
         case 3: {
 
-            T res = interpolatedElementBSpline2D_Degree3New< T >(j, i, x_shift, y_shift,
-                coefsXDim, coefsYDim, coefs);
+            // T res = interpolatedElementBSpline2D_Degree3New< T >(j, i, x_shift, y_shift,
+                // coefsXDim, coefsYDim, coefs);
+            T res = interpolatedElementBSpline2D_Degree3( xp, yp, coefsXDim, coefsYDim, coefs );
             size_t index = i * xdim + j;
             data[index] = res;
         }
             break;
         case 1: {
-            T res = interpolatedElementBSpline2D_Degree1New(j, i, x_shift, y_shift, coefsXDim,
-                    coefsYDim, coefs);
+            // T res = interpolatedElementBSpline2D_Degree1New(j, i, x_shift, y_shift, coefsXDim,
+                    // coefsYDim, coefs);
+            T res = interpolatedElementBSpline2D_Degree1( xp, yp, coefsXDim, coefsYDim, coefs );
             size_t index = i * xdim + j;
             data[index] = res;
         }
@@ -283,10 +285,23 @@ void applyLocalShiftGeometryKernelMorePixels(const T* coefsX, const T *coefsY,
 
     switch (degree) {
         case 0:
-        case 1:
         case 2:
             assert("degree 0..2 not implemented");
             break;
+        case 1:
+            #pragma unroll
+            for (int i = 0; i < pixels_per_thread; ++i) {
+                if ( y + i >= ydim ) {
+                    continue;
+                }
+                T res = interpolatedElementBSpline2D_Degree1< T >(x - shiftX[i], y + i - shiftY[i], xdim,
+                                ydim, input);
+                size_t index = (y + i) * xdim + x;
+                output[index] = res;
+            }
+
+            break;
+
         case 3: {
             #pragma unroll
             for (int i = 0; i < pixels_per_thread; ++i) {
