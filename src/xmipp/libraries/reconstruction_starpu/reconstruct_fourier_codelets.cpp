@@ -84,6 +84,9 @@ Codelets::Codelets()
 
 	// Reconstruct FFT Codelet
 	reconstruct_fft.where = STARPU_CPU | STARPU_CUDA;
+	// NOTE: From StarPU/examples/cg/cg_kernels.c it seems that STARPU_SPMD applies only to CPU implementations,
+	//       which we rely on. However, the documentation does not say that explicitly, so beware.
+	reconstruct_fft.type = starpu_codelet_type::STARPU_SPMD;
 	reconstruct_fft.cpu_funcs[0] = func_reconstruct_cpu_lookup_interpolation;
 	reconstruct_fft.cpu_funcs[1] = func_reconstruct_cpu_dynamic_interpolation; // (Typically about 2x slower than lookup interpolation)
 	reconstruct_fft.cpu_funcs_name[0] = "func_reconstruct_cpu_lookup_interpolation";

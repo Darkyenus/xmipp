@@ -1084,7 +1084,10 @@ void processBufferCPU(
 		const float *blobTableSqrt,
 		const bool fastLateBlobbing) {
 
-	for (int i = 0; i < traverseSpaceCount; ++i) {
+	const int groupSize = starpu_combined_worker_get_size();
+	const int groupRank = starpu_combined_worker_get_rank();
+
+	for (int i = groupRank; i < traverseSpaceCount; i += groupSize) {
 		const RecFourierProjectionTraverseSpace &space = traverseSpaces[i];
 
 		const float2* spaceFFT = inFFTs + fftSizeX * fftSizeY * space.projectionIndex;
