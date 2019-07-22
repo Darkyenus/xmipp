@@ -73,8 +73,8 @@
  * float[BLOB_TABLE_SIZE_SQRT]
  */
 
-/** Holds metadata about other StarPU buffers. */
-struct LoadProjectionAmountLoaded {
+/** Content of a buffer, which holds information about the amount of images in other buffers, which can be variable. */
+struct LoadedImagesBuffer {
 	/** Amount of valid images in buffers.
 	 * 'noOfImages' <= 'batchSize' */
 	uint32_t noOfImages;

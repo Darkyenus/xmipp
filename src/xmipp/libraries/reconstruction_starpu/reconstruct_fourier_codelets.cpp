@@ -46,7 +46,7 @@ Codelets::Codelets()
 	load_projections.cpu_funcs[0] = func_load_projections;
 	load_projections.cpu_funcs_name[0] = "combine_image_func";
 	load_projections.nbuffers = 3;
-	load_projections.modes[0] = STARPU_W; // LoadProjectionAmountLoaded
+	load_projections.modes[0] = STARPU_W; // LoadedImagesBuffer
 	load_projections.modes[1] = STARPU_W; // Image Data Buffer
 	load_projections.modes[2] = STARPU_W; // Spaces Buffer
 	load_projections.name = "codelet_load_projections";
@@ -63,10 +63,16 @@ Codelets::Codelets()
 	padded_image_to_fft.cpu_funcs_name[0] = "func_padded_image_to_fft_cpu";
 	padded_image_to_fft.cuda_funcs[0] = func_padded_image_to_fft_cuda;
 	padded_image_to_fft.cuda_flags[0] = STARPU_CUDA_ASYNC;
-	padded_image_to_fft.nbuffers = 3;
+	padded_image_to_fft.nbuffers = 4;
 	padded_image_to_fft.modes[0] = STARPU_R; // Padded Image Data Buffer
 	padded_image_to_fft.modes[1] = STARPU_W; // FFT Buffer
 	padded_image_to_fft.modes[2] = STARPU_SCRATCH; // Raw FFT Scratch Area
+	padded_image_to_fft.modes[3] = STARPU_R; // LoadedImagesBuffer
+	padded_image_to_fft.specific_nodes = 1;
+	padded_image_to_fft.nodes[0] = STARPU_SPECIFIC_NODE_LOCAL;
+	padded_image_to_fft.nodes[1] = STARPU_SPECIFIC_NODE_LOCAL;
+	padded_image_to_fft.nodes[2] = STARPU_SPECIFIC_NODE_LOCAL;
+	padded_image_to_fft.nodes[3] = STARPU_SPECIFIC_NODE_CPU;
 	padded_image_to_fft.name = "codelet_padded_image_to_fft";
 	// Not using any model for this, because CUDA codelet has huge initialization time, but then is very fast. This skews all statistics and decisions are not very meaningful.
 	//padded_image_to_fft.model = &padded_image_to_fft_model;
@@ -84,12 +90,20 @@ Codelets::Codelets()
 	reconstruct_fft.cpu_funcs_name[1] = "func_reconstruct_cpu_dynamic_interpolation";
 	reconstruct_fft.cuda_funcs[0] = func_reconstruct_cuda;
 	reconstruct_fft.cuda_flags[0] = STARPU_CUDA_ASYNC;
-	reconstruct_fft.nbuffers = 5;
+	reconstruct_fft.nbuffers = 6;
 	reconstruct_fft.modes[0] = STARPU_R; // FFT Buffer
 	reconstruct_fft.modes[1] = STARPU_R; // Traverse Spaces Buffer
 	reconstruct_fft.modes[2] = STARPU_R; // Blob Table Squared Buffer (only present if fastLateBlobbing is false)
 	reconstruct_fft.modes[3] = STARPU_REDUX; // Result Volume Buffer
 	reconstruct_fft.modes[4] = STARPU_REDUX; // Result Weights Buffer
+	reconstruct_fft.modes[5] = STARPU_R; // LoadedImagesBuffer
+	reconstruct_fft.specific_nodes = 1;
+	reconstruct_fft.nodes[0] = STARPU_SPECIFIC_NODE_LOCAL;
+	reconstruct_fft.nodes[1] = STARPU_SPECIFIC_NODE_LOCAL;
+	reconstruct_fft.nodes[2] = STARPU_SPECIFIC_NODE_LOCAL;
+	reconstruct_fft.nodes[3] = STARPU_SPECIFIC_NODE_LOCAL;
+	reconstruct_fft.nodes[4] = STARPU_SPECIFIC_NODE_LOCAL;
+	reconstruct_fft.nodes[5] = STARPU_SPECIFIC_NODE_CPU;
 	reconstruct_fft.name = "codelet_reconstruct_fft";
 	reconstruct_fft.model = &reconstruct_fft_model;
 	// cl_arg: ReconstructFftArgs

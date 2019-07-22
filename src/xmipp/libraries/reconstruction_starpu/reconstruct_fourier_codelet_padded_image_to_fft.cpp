@@ -101,9 +101,9 @@ void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	float2* temporaryFftScratch = (float2*)STARPU_MATRIX_GET_PTR(buffers[2]);
+	const uint32_t noOfImages = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[3]))->noOfImages;
 	const PaddedImageToFftArgs& arg = *(PaddedImageToFftArgs*)(cl_arg);
 
-	const uint32_t noOfImages = STARPU_VECTOR_GET_NX(buffers[1]);
 	const uint32_t rawFftSizeX = STARPU_MATRIX_GET_NX(buffers[2]);
 	const uint32_t rawFftSizeY = STARPU_MATRIX_GET_NY(buffers[2]);
 
@@ -195,9 +195,9 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	float2* temporaryFftScratch = (float2*)STARPU_MATRIX_GET_PTR(buffers[2]);
+	const uint32_t noOfImages = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[3]))->noOfImages;
 	const PaddedImageToFftArgs& arg = *(PaddedImageToFftArgs*)(cl_arg);
 
-	const uint32_t noOfImages = STARPU_VECTOR_GET_NX(buffers[1]);
 	const uint32_t rawFftSizeX = STARPU_MATRIX_GET_NX(buffers[2]);
 	const uint32_t rawFftSizeY = STARPU_MATRIX_GET_NY(buffers[2]);
 

@@ -765,8 +765,6 @@ void processBufferKernel(
 	}
 }
 
-
-
 /**
  * Method will use data stored in the buffer and update temporal
  * storages appropriately.
@@ -822,8 +820,7 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[2]));
 	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[3])); // Actually std::complex<float>
 	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
-
-	const uint32_t noOfImages = STARPU_VECTOR_GET_NX(buffers[0]);
+	const uint32_t noOfImages = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[5]))->noOfImages;
 
 	switch (arg.blobOrder) {
 		case 0:
@@ -1119,8 +1116,7 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[2]));
 	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[3])); // Actually std::complex<float>
 	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
-
-	const uint32_t noOfImages = STARPU_VECTOR_GET_NX(buffers[0]);
+	const uint32_t noOfImages = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[5]))->noOfImages;
 
 	switch (arg.blobOrder) {
 		case 0:

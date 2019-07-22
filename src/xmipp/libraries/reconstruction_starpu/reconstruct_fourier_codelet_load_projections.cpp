@@ -37,7 +37,7 @@
 void func_load_projections(void* buffers[], void* cl_arg) {
 	const LoadProjectionArgs& arg = *static_cast<LoadProjectionArgs*>(cl_arg);
 
-	LoadProjectionAmountLoaded& amountLoaded = *((LoadProjectionAmountLoaded*)STARPU_VARIABLE_GET_PTR(buffers[0]));
+	uint32_t& amountLoaded = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[0]))->noOfImages;
 	float* outImageData = (float*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float);
 	RecFourierProjectionTraverseSpace* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[2]);
@@ -104,5 +104,5 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 		projectionIndex++;
 	}
 
-	amountLoaded.noOfImages = projectionIndex;
+	amountLoaded = projectionIndex;
 }

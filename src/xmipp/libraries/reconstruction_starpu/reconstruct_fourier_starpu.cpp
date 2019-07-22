@@ -295,123 +295,6 @@ void ProgRecFourierStarPU::run() {
 	postProcessAndSave(params, computeConstants, fn_out, tempVolume, tempWeights, maxVolumeIndex);
 }
 
-/** Each batch is processed by multiple tasks, evaluated in sequence. After the first task finishes, it invokes this
- * struct's `invoke`, to generate and submit remaining tasks. This is required, because the tasks themselves depend on the
- * result of the first task (how many images are there in the batch). This does introduce a pipeline stall, but it shouldn't
- * be too severe. */
-struct ProgRecFourierStarPU::CompleteBatchTasks {
-
-	uint32_t batchSize;
-	uint32_t fftSizeX, fftSizeY;
-	uint32_t paddedImgSize;
-	uint32_t* loadedBatchSize;
-	starpu_data_handle_t paddedImagesDataHandle, traverseSpacesHandle;
-	starpu_data_handle_t blobTableSquaredHandle;
-	starpu_data_handle_t resultVolumeHandle, resultWeightsHandle;
-
-	PaddedImageToFftArgs* imageToFftArg;
-	ReconstructFftArgs* reconstructFftArg;
-
-	BatchProvider* progressTracker;
-
-	static void invoke(void* rawArg) {
-		const CompleteBatchTasks& arg = *static_cast<CompleteBatchTasks*>(rawArg);
-		const uint32_t loadedBatchSize = *arg.loadedBatchSize;
-		if (loadedBatchSize == 0) {
-			// If this whole batch has been eliminated, exit
-			starpu_data_unregister_submit(arg.paddedImagesDataHandle);
-			starpu_data_unregister_submit(arg.traverseSpacesHandle);
-
-			BatchProvider::batchCompleted(arg.progressTracker);
-			return;
-		}
-
-		// Partition paddedImagesDataHandle to submit only required part
-		starpu_data_handle_t partitionedPaddedImagesDataHandle = nullptr;
-		if (loadedBatchSize < arg.batchSize) {
-			struct starpu_data_filter filter = {0};
-			filter.filter_func = starpu_vector_filter_list;
-			filter.nchildren = 1;
-			uint32_t elements[1] = { loadedBatchSize };
-			filter.filter_arg_ptr = &elements;
-			starpu_data_partition_plan(arg.paddedImagesDataHandle, &filter, &partitionedPaddedImagesDataHandle);
-			starpu_data_partition_readonly_submit(arg.paddedImagesDataHandle, 1, &partitionedPaddedImagesDataHandle);
-		}
-
-		// Compute FFT of padded image data and adjust it (crop, shift, normalize)
-		starpu_data_handle_t fftHandle = {0};
-		starpu_vector_data_register(&fftHandle, -1, 0, loadedBatchSize, arg.fftSizeX * arg.fftSizeY * 2 * sizeof(float));
-		starpu_data_set_name(fftHandle, "Batch FFT Data");
-
-		{
-			starpu_data_handle_t fftScratchMemoryHandle = {0};
-			// As documented in http://fftw.org/fftw3_doc/Multi_002dDimensional-DFTs-of-Real-Data.html#Multi_002dDimensional-DFTs-of-Real-Data
-			uint32_t fftResultX = arg.paddedImgSize/2+1;
-			starpu_matrix_data_register(&fftScratchMemoryHandle, -1, 0, fftResultX /* no padding */, fftResultX, arg.paddedImgSize, sizeof(float) * 2);
-			starpu_data_set_name(fftScratchMemoryHandle, "Scratch for raw FFT");
-
-			starpu_task* paddedImageToFftTask = starpu_task_create();
-			paddedImageToFftTask->name = "PaddedImageToFFT";
-			paddedImageToFftTask->cl = &codelet.padded_image_to_fft;
-			paddedImageToFftTask->handles[0] = partitionedPaddedImagesDataHandle ? partitionedPaddedImagesDataHandle : arg.paddedImagesDataHandle;
-			paddedImageToFftTask->handles[1] = fftHandle;
-			paddedImageToFftTask->handles[2] = fftScratchMemoryHandle;
-			paddedImageToFftTask->cl_arg = arg.imageToFftArg;
-			paddedImageToFftTask->cl_arg_size = sizeof(PaddedImageToFftArgs);
-			paddedImageToFftTask->cl_arg_free = 0;
-			paddedImageToFftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
-			CHECK_STARPU(starpu_task_submit(paddedImageToFftTask));
-
-			starpu_data_unregister_submit(fftScratchMemoryHandle);
-		}
-
-		if (partitionedPaddedImagesDataHandle) {
-			starpu_data_unpartition_submit(arg.paddedImagesDataHandle, 1, &partitionedPaddedImagesDataHandle, -1);
-			starpu_data_partition_clean(arg.paddedImagesDataHandle, 1, &partitionedPaddedImagesDataHandle);
-		}
-		starpu_data_unregister_submit(arg.paddedImagesDataHandle);
-
-		// Partition traverseSpacesHandle to submit only required part
-		starpu_data_handle_t partitionedTraverseSpacesHandle = nullptr;
-		if (loadedBatchSize < arg.batchSize) {
-			struct starpu_data_filter filter = {0};
-			filter.filter_func = starpu_vector_filter_list;
-			filter.nchildren = 1;
-			uint32_t elements[1] = { loadedBatchSize };
-			filter.filter_arg_ptr = &elements;
-			starpu_data_partition_plan(arg.traverseSpacesHandle, &filter, &partitionedTraverseSpacesHandle);
-			starpu_data_partition_readonly_submit(arg.traverseSpacesHandle, 1, &partitionedTraverseSpacesHandle);
-		}
-
-		{// Submit the actual reconstruction
-			starpu_task* reconstructFftTask = starpu_task_create();
-			reconstructFftTask->name = "ReconstructFFT";
-			reconstructFftTask->cl = &codelet.reconstruct_fft;
-			reconstructFftTask->handles[0] = fftHandle;
-			reconstructFftTask->handles[1] = partitionedTraverseSpacesHandle ? partitionedTraverseSpacesHandle : arg.traverseSpacesHandle;
-			reconstructFftTask->handles[2] = arg.blobTableSquaredHandle;
-			reconstructFftTask->handles[3] = arg.resultVolumeHandle;
-			reconstructFftTask->handles[4] = arg.resultWeightsHandle;
-			reconstructFftTask->cl_arg = arg.reconstructFftArg;
-			reconstructFftTask->cl_arg_size = sizeof(ReconstructFftArgs);
-			reconstructFftTask->cl_arg_free = 0;
-			reconstructFftTask->callback_func = BatchProvider::batchCompleted;
-			reconstructFftTask->callback_arg = arg.progressTracker;
-			reconstructFftTask->callback_arg_free = 0;
-			reconstructFftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
-
-			CHECK_STARPU(starpu_task_submit(reconstructFftTask));
-		}
-
-		starpu_data_unregister_submit(fftHandle);
-		if (partitionedTraverseSpacesHandle) {
-			starpu_data_unpartition_submit(arg.traverseSpacesHandle, 1, &partitionedTraverseSpacesHandle, -1);
-			starpu_data_partition_clean(arg.traverseSpacesHandle, 1, &partitionedTraverseSpacesHandle);
-		}
-		starpu_data_unregister_submit(arg.traverseSpacesHandle);
-	}
-};
-
 void ProgRecFourierStarPU::initStarPU() {
 	// Request more workers per CUDA-capable GPU
 	setenv("STARPU_NWORKER_PER_CUDA",
@@ -489,12 +372,12 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 	}
 
 	starpu_data_handle_t blobTableSquaredHandle = {0};
-	if (!params.fastLateBlobbing) {
-		starpu_variable_data_register(&blobTableSquaredHandle, STARPU_MAIN_RAM,
-		                              reinterpret_cast<uintptr_t>(&computeConstants.blobTableSqrt), sizeof(computeConstants.blobTableSqrt));
-	} else {
+	if (params.fastLateBlobbing) {
 		// Blob Table is not used on GPU, but we need to register empty regardless
 		starpu_variable_data_register(&blobTableSquaredHandle, -1, 0, 1);
+	} else {
+		starpu_variable_data_register(&blobTableSquaredHandle, STARPU_MAIN_RAM,
+		                              reinterpret_cast<uintptr_t>(&computeConstants.blobTableSqrt), sizeof(computeConstants.blobTableSqrt));
 	}
 	starpu_data_set_name(blobTableSquaredHandle, "Blob Table Squared");
 
@@ -502,10 +385,16 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 	const uint32_t maxBatches = batches.maxBatches();
 
 	std::vector<LoadProjectionArgs> loadProjectionArgs;
-	std::vector<LoadProjectionAmountLoaded> batchMetaData;
-	// WARNING: Backing arrays of these vectors must never reallocate, as we use pointers into it for codelet arguments
+	// WARNING: Backing arrays of this vector must never reallocate, as we use pointers into it for codelet arguments
 	loadProjectionArgs.reserve(maxBatches);
-	batchMetaData.reserve(maxBatches);
+
+	// Used in a STARPU_SCRATCH mode, so the handle can be shared between all relevant tasks,
+	// as the all will get a different memory to work with.
+	starpu_data_handle_t fftScratchMemoryHandle = {0};
+	// As documented in http://fftw.org/fftw3_doc/Multi_002dDimensional-DFTs-of-Real-Data.html#Multi_002dDimensional-DFTs-of-Real-Data
+	uint32_t fftResultX = paddedImgSize/2+1;
+	starpu_matrix_data_register(&fftScratchMemoryHandle, -1, 0, fftResultX /* no padding */, fftResultX, paddedImgSize, sizeof(float) * 2);
+	starpu_data_set_name(fftScratchMemoryHandle, "Scratch for raw FFT");
 
 	int32_t batch;
 	while ((batch = batches.nextBatch()) != -1) {
@@ -513,30 +402,8 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		const uint32_t batchEnd = XMIPP_MIN(batchStart + params.batchSize, totalImages);
 		const uint32_t currentBatchSize = static_cast<uint32_t>(batchEnd - batchStart);
 
-		const size_t argIndex = loadProjectionArgs.size();
-
-		// Create new LoadProjectionArgs for this batch
-		loadProjectionArgs.push_back(LoadProjectionArgs {
-				batchStart, batchEnd,
-				SF,
-				selFileObjectIds,
-				params.do_weights,
-				computeConstants.R_symmetries,
-				maxVolumeIndex, maxVolumeIndex,
-				static_cast<float>(params.blob.radius),
-				params.fastLateBlobbing,
-				paddedImgSize,
-				fftSizeX, fftSizeY
-		});
-		const LoadProjectionArgs& loadProjectionArg = loadProjectionArgs[argIndex];
-
-		batchMetaData.push_back(LoadProjectionAmountLoaded {
-				0 // noOfImages
-		});
-		LoadProjectionAmountLoaded& amountLoaded = batchMetaData[argIndex];
-
 		starpu_data_handle_t amountLoadedHandle = {0};
-		starpu_variable_data_register(&amountLoadedHandle, STARPU_MAIN_RAM, (uintptr_t) &amountLoaded, sizeof(amountLoaded));
+		starpu_variable_data_register(&amountLoadedHandle, -1, 0, sizeof(LoadedImagesBuffer));
 		starpu_data_set_name(amountLoadedHandle, "Batch Meta Data");
 
 		starpu_data_handle_t paddedImagesDataHandle = {0};
@@ -548,51 +415,96 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		starpu_data_set_name(traverseSpacesHandle, "Batch Traverse Spaces");
 
 		// Submit the task to load the projections
-		starpu_task *loadProjectionsTask = starpu_task_create();
-		loadProjectionsTask->name = "LoadProjections";
-		loadProjectionsTask->cl = &codelet.load_projections;
-		loadProjectionsTask->cl_arg = (void *) &loadProjectionArg;
-		loadProjectionsTask->cl_arg_size = sizeof(loadProjectionArg);
-		loadProjectionsTask->cl_arg_free = 0; // Do not free! (probably default)
-		loadProjectionsTask->handles[0] = amountLoadedHandle;
-		loadProjectionsTask->handles[1] = paddedImagesDataHandle;
-		loadProjectionsTask->handles[2] = traverseSpacesHandle;
-		loadProjectionsTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
+		{
+			const size_t argIndex = loadProjectionArgs.size();
 
-		CompleteBatchTasks *arg = static_cast<CompleteBatchTasks *>(malloc(sizeof(CompleteBatchTasks)));
+			// Create new LoadProjectionArgs for this batch
+			loadProjectionArgs.push_back(LoadProjectionArgs {
+					batchStart, batchEnd,
+					SF,
+					selFileObjectIds,
+					params.do_weights,
+					computeConstants.R_symmetries,
+					maxVolumeIndex, maxVolumeIndex,
+					static_cast<float>(params.blob.radius),
+					params.fastLateBlobbing,
+					paddedImgSize,
+					fftSizeX, fftSizeY
+			});
 
-		arg->batchSize = currentBatchSize;
-		arg->fftSizeX = fftSizeX;
-		arg->fftSizeY = fftSizeY;
-		arg->paddedImgSize = paddedImgSize;
-		arg->loadedBatchSize = &amountLoaded.noOfImages;
-		arg->paddedImagesDataHandle = paddedImagesDataHandle;
-		arg->traverseSpacesHandle = traverseSpacesHandle;
-		arg->blobTableSquaredHandle = blobTableSquaredHandle;
-		arg->resultVolumeHandle = resultVolumeHandle;
-		arg->resultWeightsHandle = resultWeightsHandle;
+			const LoadProjectionArgs& loadProjectionArg = loadProjectionArgs[argIndex];
 
-		arg->imageToFftArg = &imageToFftArg;
-		arg->reconstructFftArg = &reconstructFftArg;
-		arg->progressTracker = &batches;
+			starpu_task *loadProjectionsTask = starpu_task_create();
+			loadProjectionsTask->name = "LoadProjections";
+			loadProjectionsTask->cl = &codelet.load_projections;
+			loadProjectionsTask->cl_arg = (void *) &loadProjectionArg;
+			loadProjectionsTask->cl_arg_size = sizeof(loadProjectionArg);
+			loadProjectionsTask->cl_arg_free = 0; // Do not free! (probably default)
+			loadProjectionsTask->handles[0] = amountLoadedHandle;
+			loadProjectionsTask->handles[1] = paddedImagesDataHandle;
+			loadProjectionsTask->handles[2] = traverseSpacesHandle;
+			loadProjectionsTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
 
-		loadProjectionsTask->callback_func = &CompleteBatchTasks::invoke;
-		loadProjectionsTask->callback_arg = arg;
-		loadProjectionsTask->callback_arg_free = 1;
+			CHECK_STARPU(starpu_task_submit(loadProjectionsTask));
+		}
 
-		CHECK_STARPU(starpu_task_submit(loadProjectionsTask));
+		// Compute FFT of padded image data and adjust it (crop, shift, normalize)
+		starpu_data_handle_t fftHandle = {0};
+		starpu_vector_data_register(&fftHandle, -1, 0, currentBatchSize, fftSizeX * fftSizeY * 2 * sizeof(float));
+		starpu_data_set_name(fftHandle, "Batch FFT Data");
 
+		{
+			starpu_task* paddedImageToFftTask = starpu_task_create();
+			paddedImageToFftTask->name = "PaddedImageToFFT";
+			paddedImageToFftTask->cl = &codelet.padded_image_to_fft;
+			paddedImageToFftTask->handles[0] = paddedImagesDataHandle;
+			paddedImageToFftTask->handles[1] = fftHandle;
+			paddedImageToFftTask->handles[2] = fftScratchMemoryHandle;
+			paddedImageToFftTask->handles[3] = amountLoadedHandle;
+			paddedImageToFftTask->cl_arg = &imageToFftArg;
+			paddedImageToFftTask->cl_arg_size = sizeof(PaddedImageToFftArgs);
+			paddedImageToFftTask->cl_arg_free = 0;
+			paddedImageToFftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
+			CHECK_STARPU(starpu_task_submit(paddedImageToFftTask));
+		}
+
+		starpu_data_unregister_submit(paddedImagesDataHandle);
+
+		{// Submit the actual reconstruction
+			starpu_task* reconstructFftTask = starpu_task_create();
+			reconstructFftTask->name = "ReconstructFFT";
+			reconstructFftTask->cl = &codelet.reconstruct_fft;
+			reconstructFftTask->handles[0] = fftHandle;
+			reconstructFftTask->handles[1] = traverseSpacesHandle;
+			reconstructFftTask->handles[2] = blobTableSquaredHandle;
+			reconstructFftTask->handles[3] = resultVolumeHandle;
+			reconstructFftTask->handles[4] = resultWeightsHandle;
+			reconstructFftTask->handles[5] = amountLoadedHandle;
+			reconstructFftTask->cl_arg = &reconstructFftArg;
+			reconstructFftTask->cl_arg_size = sizeof(ReconstructFftArgs);
+			reconstructFftTask->cl_arg_free = 0;
+			reconstructFftTask->callback_func = BatchProvider::batchCompleted;
+			reconstructFftTask->callback_arg = &batches;
+			reconstructFftTask->callback_arg_free = 0;
+			reconstructFftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
+
+			CHECK_STARPU(starpu_task_submit(reconstructFftTask));
+		}
+
+		// Mark buffers shared between tasks of a batch for removal
+		starpu_data_unregister_submit(fftHandle);
+		starpu_data_unregister_submit(traverseSpacesHandle);
 		starpu_data_unregister_submit(amountLoadedHandle);
 	}
+
+	// Mark helper buffers that are shared between all tasks for removal
+	starpu_data_unregister_submit(blobTableSquaredHandle);
+	starpu_data_unregister_submit(fftScratchMemoryHandle);
 
 	// Complete all processing
 	CHECK_STARPU(starpu_task_wait_for_all());
 
-	// Release blob table handle. This could be done earlier, after all CompleteBatchTasks callbacks are done,
-	// but it is hard to tell when that is, so it is done here.
-	starpu_data_unregister_submit(blobTableSquaredHandle);
-
-	// Release last two buffers and copy them to original places
+	// Release result buffers synchronously, implicitly causes them to be copied to original memory location
 	starpu_data_unregister(resultVolumeHandle);
 	starpu_data_unregister(resultWeightsHandle);
 
