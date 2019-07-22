@@ -45,12 +45,10 @@ Codelets::Codelets()
 	load_projections.where = STARPU_CPU;
 	load_projections.cpu_funcs[0] = func_load_projections;
 	load_projections.cpu_funcs_name[0] = "combine_image_func";
-	load_projections.nbuffers = 5;
+	load_projections.nbuffers = 3;
 	load_projections.modes[0] = STARPU_W; // LoadProjectionAmountLoaded
-	load_projections.modes[1] = STARPU_W; // if hasCTF: CTFs buffer
-	load_projections.modes[2] = STARPU_W; // if hasCTF: Modulators Buffer
-	load_projections.modes[3] = STARPU_W; // Image Data Buffer
-	load_projections.modes[4] = STARPU_W; // Spaces Buffer
+	load_projections.modes[1] = STARPU_W; // Image Data Buffer
+	load_projections.modes[2] = STARPU_W; // Spaces Buffer
 	load_projections.name = "codelet_load_projections";
 	load_projections.model = &load_projections_model;
 	// cl_arg: LoadProjectionArgs - MUST NOT BE COPIED!!!
@@ -86,14 +84,12 @@ Codelets::Codelets()
 	reconstruct_fft.cpu_funcs_name[1] = "func_reconstruct_cpu_dynamic_interpolation";
 	reconstruct_fft.cuda_funcs[0] = func_reconstruct_cuda;
 	reconstruct_fft.cuda_flags[0] = STARPU_CUDA_ASYNC;
-	reconstruct_fft.nbuffers = 7;
+	reconstruct_fft.nbuffers = 5;
 	reconstruct_fft.modes[0] = STARPU_R; // FFT Buffer
-	reconstruct_fft.modes[1] = STARPU_R; // CTF Buffer (only if hasCTF)
-	reconstruct_fft.modes[2] = STARPU_R; // Modulators Buffer (only if hasCTF)
-	reconstruct_fft.modes[3] = STARPU_R; // Traverse Spaces Buffer
-	reconstruct_fft.modes[4] = STARPU_R; // Blob Table Squared Buffer (only present if fastLateBlobbing is false)
-	reconstruct_fft.modes[5] = STARPU_REDUX; // Result Volume Buffer
-	reconstruct_fft.modes[6] = STARPU_REDUX; // Result Weights Buffer
+	reconstruct_fft.modes[1] = STARPU_R; // Traverse Spaces Buffer
+	reconstruct_fft.modes[2] = STARPU_R; // Blob Table Squared Buffer (only present if fastLateBlobbing is false)
+	reconstruct_fft.modes[3] = STARPU_REDUX; // Result Volume Buffer
+	reconstruct_fft.modes[4] = STARPU_REDUX; // Result Weights Buffer
 	reconstruct_fft.name = "codelet_reconstruct_fft";
 	reconstruct_fft.model = &reconstruct_fft_model;
 	// cl_arg: ReconstructFftArgs

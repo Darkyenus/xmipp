@@ -27,7 +27,6 @@
 #ifndef XMIPP_LIBRARIES_RECONSTRUCT_FOURIER_STARPU_UTIL_H_
 #define XMIPP_LIBRARIES_RECONSTRUCT_FOURIER_STARPU_UTIL_H_
 
-#include <data/ctf.h>
 #include <data/point3D.h>
 #include <data/blobs.h>
 #include <reconstruction/reconstruct_fourier_projection_traverse_space.h>
@@ -257,53 +256,6 @@ static void computeTraverseSpace(uint32_t imgSizeX, uint32_t imgSizeY,
 		space.dir = RecFourierProjectionTraverseSpace::Direction::XZ;
 	} else if (nZ >= nX && nZ >= nY) { // iterate XY plane
 		space.dir = RecFourierProjectionTraverseSpace::Direction::XY;
-	}
-}
-
-/**
- * Method computes CTF and weight modulator for each pixel in the image
- */
-static inline void computeCTFCorrection(const MetaData& selFile,
-                                        uint32_t fftSizeX, uint32_t fftSizeY,
-                                        size_t imgIndex,
-                                        float* outCTFs,
-                                        float* outModulators,
-                                        uint32_t paddedImgSize, double iTs, double minCTF, bool isPhaseFlipped) {
-	CTFDescription ctf;
-	ctf.readFromMetadataRow(selFile, imgIndex);
-	ctf.produceSideInfo();
-
-	for (int y = 0; y < fftSizeY; y++) {
-		// since Y axis is shifted to center, we have to use different calculation
-		float freqY = (y - (paddedImgSize / 2.f)) / (float) paddedImgSize;
-		for (int x = 0; x < fftSizeY; x++) { //TODO(jp): really fftSize_Y_?
-			// get respective frequency
-			float freqX;
-			FFT_IDX2DIGFREQ(x, paddedImgSize, freqX);
-			ctf.precomputeValues(freqX * iTs, freqY * iTs);
-
-			float CTFVal = static_cast<float>(ctf.getValuePureNoKAt());
-			float modulatorVal = 1.0f;
-			if (std::isnan(CTFVal)) {
-				if ((x == 0) && (y == 0)) {
-					modulatorVal = CTFVal = 1.0f;
-				} else {
-					modulatorVal = CTFVal = 0.0f;
-				}
-			}
-			if (fabs(CTFVal) < minCTF) {
-				modulatorVal = fabs(CTFVal);
-				CTFVal = SGN(CTFVal);
-			} else {
-				CTFVal = 1.0f / CTFVal;
-			}
-			if (isPhaseFlipped)
-				CTFVal = fabs(CTFVal);
-
-			int index = y * fftSizeX + x;
-			outCTFs[index] = CTFVal;
-			outModulators[index] = modulatorVal;
-		}
 	}
 }
 

@@ -432,21 +432,16 @@ bool isWithin(Point3D<float> AABB[2], int imgXSize, int imgYSize) {
  * spaces to the given projection and update temporal spaces
  * using the pixel value of the projection.
  */
-template<bool hasCTF>
 __device__
 void processVoxel(
 		float2* tempVolumeGPU, float* tempWeightsGPU,
 		int x, int y, int z,
 		int xSize, int ySize,
-		const float* __restrict__ CTF,
-		const float* __restrict__ modulator,
 		const float2* __restrict__ FFT,
 		const RecFourierProjectionTraverseSpace* const space)
 {
 	Point3D<float> imgPos;
 	float wBlob = 1.f;
-	float wCTF = 1.f;
-	float wModulator = 1.f;
 
 	float dataWeight = space->weight;
 
@@ -469,16 +464,11 @@ void processVoxel(
 	int index3D = z * (gpuC.cMaxVolumeIndexYZ+1) * (gpuC.cMaxVolumeIndexX+1) + y * (gpuC.cMaxVolumeIndexX+1) + x;
 	int index2D = imgY * xSize + imgX;
 
-	if (hasCTF) {
-		wCTF = CTF[index2D];
-		wModulator = modulator[index2D];
-	}
-
-	float weight = wBlob * wModulator * dataWeight;
+	float weight = wBlob * dataWeight;
 
 	// use atomic as two blocks can write to same voxel
-	atomicAdd(&tempVolumeGPU[index3D].x, FFT[index2D].x * weight * wCTF);
-	atomicAdd(&tempVolumeGPU[index3D].y, FFT[index2D].y * weight * wCTF);
+	atomicAdd(&tempVolumeGPU[index3D].x, FFT[index2D].x * weight);
+	atomicAdd(&tempVolumeGPU[index3D].y, FFT[index2D].y * weight);
 	atomicAdd(&tempWeightsGPU[index3D], weight);
 }
 
@@ -487,14 +477,12 @@ void processVoxel(
  * spaces to the given projection and update temporal spaces
  * using the pixel values of the projection withing the blob distance.
  */
-template<bool hasCTF, int blobOrder, bool useFastKaiser>
+template<int blobOrder, bool useFastKaiser>
 __device__
 void processVoxelBlob(
 		float2* tempVolumeGPU, float *tempWeightsGPU,
 		const int x, const int y, const int z,
 		const int xSize, const int ySize,
-		const float* __restrict__ CTF,
-		const float* __restrict__ modulator,
 		const float2* __restrict__ FFT,
 		const RecFourierProjectionTraverseSpace* const space,
 		const float* blobTableSqrt,
@@ -535,77 +523,31 @@ void processVoxelBlob(
 	vol.x = vol.y = w = 0.f;
 	float dataWeight = space->weight;
 
-	// ugly spaghetti code, but improves performance by app. 10%
-	if (hasCTF) {
-		// check which pixel in the vicinity should contribute
-		for (int i = minY; i <= maxY; i++) {
-			float ySqr = (imgPos.y - i) * (imgPos.y - i);
-			float yzSqr = ySqr + zSqr;
-			if (yzSqr > radiusSqr) continue;
-			for (int j = minX; j <= maxX; j++) {
-				float xD = imgPos.x - j;
-				float distanceSqr = xD*xD + yzSqr;
-				if (distanceSqr > radiusSqr) continue;
+	// check which pixel in the vicinity should contribute
+	for (int i = minY; i <= maxY; i++) {
+		float ySqr = (imgPos.y - i) * (imgPos.y - i);
+		float yzSqr = ySqr + zSqr;
+		if (yzSqr > radiusSqr) continue;
+		for (int j = minX; j <= maxX; j++) {
+			float xD = imgPos.x - j;
+			float distanceSqr = xD*xD + yzSqr;
+			if (distanceSqr > radiusSqr) continue;
 
 #if SHARED_IMG
-				int index2D = (i - SHARED_AABB[0].y) * imgCacheDim + (j-SHARED_AABB[0].x); // position in img - offset of the AABB
+			int index2D = (i - SHARED_AABB[0].y) * imgCacheDim + (j-SHARED_AABB[0].x); // position in img - offset of the AABB
 #else
-				int index2D = i * xSize + j;
-#endif
-
-				float wCTF = CTF[index2D];
-				float wModulator = modulator[index2D];
-#if PRECOMPUTE_BLOB_VAL
-				int aux = (int) ((distanceSqr * gpuC.cIDeltaSqrt + 0.5f));
-#if SHARED_BLOB_TABLE
-				float wBlob = BLOB_TABLE[aux];
-#else
-				float wBlob = blobTableSqrt[aux];
-#endif
-#else
-				float wBlob;
-				if (useFastKaiser) {
-					wBlob = kaiserValueFast(distanceSqr);
-				}
-				else {
-					wBlob = kaiserValue<blobOrder>(sqrtf(distanceSqr),gpuC.cBlobRadius) * gpuC.cIw0;
-				}
-#endif
-				float weight = wBlob * wModulator * dataWeight;
-				w += weight;
-#if SHARED_IMG
-				vol += IMG[index2D] * weight * wCTF;
-#else
-				vol += FFT[index2D] * weight * wCTF;
-#endif
-			}
-		}
-	} else {
-		// check which pixel in the vicinity should contribute
-		for (int i = minY; i <= maxY; i++) {
-			float ySqr = (imgPos.y - i) * (imgPos.y - i);
-			float yzSqr = ySqr + zSqr;
-			if (yzSqr > radiusSqr) continue;
-			for (int j = minX; j <= maxX; j++) {
-				float xD = imgPos.x - j;
-				float distanceSqr = xD*xD + yzSqr;
-				if (distanceSqr > radiusSqr) continue;
-
-#if SHARED_IMG
-				int index2D = (i - SHARED_AABB[0].y) * imgCacheDim + (j-SHARED_AABB[0].x); // position in img - offset of the AABB
-#else
-				int index2D = i * xSize + j;
+			int index2D = i * xSize + j;
 #endif
 
 #if PRECOMPUTE_BLOB_VAL
-				int aux = (int) ((distanceSqr * gpuC.cIDeltaSqrt + 0.5f));
+			int aux = (int) ((distanceSqr * gpuC.cIDeltaSqrt + 0.5f));
 #if SHARED_BLOB_TABLE
-				float wBlob = BLOB_TABLE[aux];
+			float wBlob = BLOB_TABLE[aux];
 #else
-				float wBlob = blobTableSqrt[aux];
+			float wBlob = blobTableSqrt[aux];
 #endif
 #else
-				float wBlob;
+			float wBlob;
 				if (useFastKaiser) {
 					wBlob = kaiserValueFast(distanceSqr);
 				}
@@ -613,16 +555,16 @@ void processVoxelBlob(
 					wBlob = kaiserValue<blobOrder>(sqrtf(distanceSqr), gpuC.cBlobRadius) * gpuC.cIw0;
 				}
 #endif
-				float weight = wBlob * dataWeight;
-				w += weight;
+			float weight = wBlob * dataWeight;
+			w += weight;
 #if SHARED_IMG
-				vol += IMG[index2D] * weight;
+			vol += IMG[index2D] * weight;
 #else
-				vol += FFT[index2D] * weight;
+			vol += FFT[index2D] * weight;
 #endif
-			}
 		}
 	}
+
 	// use atomic as two blocks can write to same voxel
 	atomicAdd(&tempVolumeGPU[index3D].x, vol.x);
 	atomicAdd(&tempVolumeGPU[index3D].y, vol.y);
@@ -633,13 +575,11 @@ void processVoxelBlob(
   * Method will process one projection image and add result to temporal
   * spaces.
   */
-template<bool useFast, bool hasCTF, int blobOrder, bool useFastKaiser>
+template<bool useFast, int blobOrder, bool useFastKaiser>
 __device__
 void processProjection(
 		float2* tempVolumeGPU, float *tempWeightsGPU,
 		const int xSize, const int ySize,
-		const float* __restrict__ CTF,
-		const float* __restrict__ modulator,
 		const float2* __restrict__ FFT,
 		const RecFourierProjectionTraverseSpace* const tSpace,
 		const float* blobTableSqrt,
@@ -664,7 +604,7 @@ void processProjection(
 				if (useFast) {
 					float hitZ = getZ(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin);
 					int z = (int)(hitZ + 0.5f); // rounding
-					processVoxel<hasCTF>(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize , CTF, modulator, FFT, tSpace);
+					processVoxel(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize, FFT, tSpace);
 				} else {
 					float z1 = getZ(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin); // lower plane
 					float z2 = getZ(idx, idy, tSpace->unitNormal, tSpace->topOrigin); // upper plane
@@ -673,7 +613,7 @@ void processProjection(
 					int lower = static_cast<int>(floorf(fminf(z1, z2)));
 					int upper = static_cast<int>(ceilf(fmaxf(z1, z2)));
 					for (int z = lower; z <= upper; z++) {
-						processVoxelBlob<hasCTF, blobOrder, useFastKaiser>(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize , CTF, modulator, FFT, tSpace, blobTableSqrt, imgCacheDim);
+						processVoxelBlob<blobOrder, useFastKaiser>(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize, FFT, tSpace, blobTableSqrt, imgCacheDim);
 					}
 				}
 			}
@@ -684,7 +624,7 @@ void processProjection(
 				if (useFast) {
 					float hitY =getY(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin);
 					int y = (int)(hitY + 0.5f); // rounding
-					processVoxel<hasCTF>(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize , CTF, modulator, FFT, tSpace);
+					processVoxel(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize, FFT, tSpace);
 				} else {
 					float y1 = getY(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin); // lower plane
 					float y2 = getY(idx, idy, tSpace->unitNormal, tSpace->topOrigin); // upper plane
@@ -693,7 +633,7 @@ void processProjection(
 					int lower = static_cast<int>(floorf(fminf(y1, y2)));
 					int upper = static_cast<int>(ceilf(fmaxf(y1, y2)));
 					for (int y = lower; y <= upper; y++) {
-						processVoxelBlob<hasCTF, blobOrder, useFastKaiser>(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize , CTF, modulator, FFT, tSpace, blobTableSqrt, imgCacheDim);
+						processVoxelBlob<blobOrder, useFastKaiser>(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize, FFT, tSpace, blobTableSqrt, imgCacheDim);
 					}
 				}
 			}
@@ -704,7 +644,7 @@ void processProjection(
 				if (useFast) {
 					float hitX = getX(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin);
 					int x = (int)(hitX + 0.5f); // rounding
-					processVoxel<hasCTF>(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize , CTF, modulator, FFT, tSpace);
+					processVoxel(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize, FFT, tSpace);
 				} else {
 					float x1 = getX(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin); // lower plane
 					float x2 = getX(idx, idy, tSpace->unitNormal, tSpace->topOrigin); // upper plane
@@ -713,7 +653,7 @@ void processProjection(
 					int lower = static_cast<int>(floorf(fminf(x1, x2)));
 					int upper = static_cast<int>(ceilf(fmaxf(x1, x2)));
 					for (int x = lower; x <= upper; x++) {
-						processVoxelBlob<hasCTF, blobOrder, useFastKaiser>(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize , CTF, modulator, FFT, tSpace, blobTableSqrt, imgCacheDim);
+						processVoxelBlob<blobOrder, useFastKaiser>(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize, FFT, tSpace, blobTableSqrt, imgCacheDim);
 					}
 				}
 			}
@@ -768,13 +708,12 @@ void copyImgToCache(float2* dest, const Point3D<float> AABB[2],
  * Method will use data stored in the buffer and update temporal
  * storages appropriately.
  */
-template<bool fastLateBlobbing, bool hasCTF, int blobOrder, bool useFastKaiser>
+template<bool fastLateBlobbing, int blobOrder, bool useFastKaiser>
 __global__
 void processBufferKernel(
 		float2* outVolumeBuffer, float *outWeightsBuffer,
 		const int fftSizeX, const int fftSizeY,
 		const int traverseSpaceCount, const RecFourierProjectionTraverseSpace* traverseSpaces,
-		const float* CTFs, const float* modulators,
 		const float2* FFTs,
 		const float* blobTableSqrt,
 		int imgCacheDim) {
@@ -814,11 +753,9 @@ void processBufferKernel(
 		}
 #endif
 
-		processProjection<fastLateBlobbing, hasCTF, blobOrder, useFastKaiser>(
+		processProjection<fastLateBlobbing, blobOrder, useFastKaiser>(
 				outVolumeBuffer, outWeightsBuffer,
 				fftSizeX, fftSizeY,
-				CTFs + fftSizeX * fftSizeY * space.projectionIndex,
-				modulators + fftSizeX * fftSizeY * space.projectionIndex,
 				FFTs + fftSizeX * fftSizeY * space.projectionIndex,
 				&space,
 				blobTableSqrt,
@@ -841,7 +778,6 @@ void processBufferGPU(
 		float2 *outVolumeBuffer, float *outWeightsBuffer,
 		const int fftSizeX, const int fftSizeY,
 		const int traverseSpaceCount, const RecFourierProjectionTraverseSpace *traverseSpaces,
-		const bool hasCTFs, const float *CTFs, const float *modulators,
 		const float2 *inFFTs,
 		const float *blobTableSqrt,
 		const bool fastLateBlobbing,
@@ -857,67 +793,35 @@ void processBufferGPU(
 	             GRID_DIM_Z);
 
 	// by using templates, we can save some registers, especially for 'fast' version
-	if (fastLateBlobbing && hasCTFs) {
-		processBufferKernel<true, true, blobOrder,useFastKaiser><<<dimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
+	if (fastLateBlobbing) {
+		processBufferKernel<true, blobOrder,useFastKaiser><<<dimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
 				outVolumeBuffer, outWeightsBuffer,
-						fftSizeX, fftSizeY,
-						traverseSpaceCount, traverseSpaces,
-						CTFs, modulators,
-						inFFTs,
-						blobTableSqrt,
-						imgCacheDim);
-		gpuErrchk(cudaPeekAtLastError());
-		return;
-	}
-	if (fastLateBlobbing && !hasCTFs) {
-		processBufferKernel<true, false, blobOrder,useFastKaiser><<<dimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
+				fftSizeX, fftSizeY,
+				traverseSpaceCount, traverseSpaces,
+				inFFTs,
+				blobTableSqrt,
+				imgCacheDim);
+	} else {
+		// if making copy of the image in shared memory, allocate enough space
+		int sharedMemSize = SHARED_IMG ? (imgCacheDim*imgCacheDim*sizeof(float2)) : 0;
+		processBufferKernel<false, blobOrder,useFastKaiser><<<dimGrid, dimBlock, sharedMemSize, starpu_cuda_get_local_stream()>>>(
 				outVolumeBuffer, outWeightsBuffer,
-						fftSizeX, fftSizeY,
-						traverseSpaceCount, traverseSpaces,
-						CTFs, modulators,
-						inFFTs,
-						blobTableSqrt,
-						imgCacheDim);
-		gpuErrchk(cudaPeekAtLastError());
-		return;
+				fftSizeX, fftSizeY,
+				traverseSpaceCount, traverseSpaces,
+				inFFTs,
+				blobTableSqrt,
+				imgCacheDim);
 	}
-	// if making copy of the image in shared memory, allocate enough space
-	int sharedMemSize = SHARED_IMG ? (imgCacheDim*imgCacheDim*sizeof(float2)) : 0;
-	if (!fastLateBlobbing && hasCTFs) {
-		processBufferKernel<false, true, blobOrder,useFastKaiser><<<dimGrid, dimBlock, sharedMemSize, starpu_cuda_get_local_stream()>>>(
-				outVolumeBuffer, outWeightsBuffer,
-						fftSizeX, fftSizeY,
-						traverseSpaceCount, traverseSpaces,
-						CTFs, modulators,
-						inFFTs,
-						blobTableSqrt,
-						imgCacheDim);
-		gpuErrchk(cudaPeekAtLastError());
-		return;
-	}
-	if (!fastLateBlobbing && !hasCTFs) {
-		processBufferKernel<false, false, blobOrder,useFastKaiser><<<dimGrid, dimBlock, sharedMemSize, starpu_cuda_get_local_stream()>>>(
-				outVolumeBuffer, outWeightsBuffer,
-						fftSizeX, fftSizeY,
-						traverseSpaceCount, traverseSpaces,
-						CTFs, modulators,
-						inFFTs,
-						blobTableSqrt,
-						imgCacheDim);
-		gpuErrchk(cudaPeekAtLastError());
-		return;
-	}
+	gpuErrchk(cudaPeekAtLastError());
 }
 
 void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 	const ReconstructFftArgs& arg = *(ReconstructFftArgs*) cl_arg;
 	const float2* inFFTs = (float2*)STARPU_VECTOR_GET_PTR(buffers[0]);
-	const float* inCTFs = arg.hasCTF ? (float*)STARPU_VECTOR_GET_PTR(buffers[1]) : nullptr;
-	const float* inModulators = arg.hasCTF ? (float*)STARPU_VECTOR_GET_PTR(buffers[2]) : nullptr;
-	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[3]);
-	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
-	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[5])); // Actually std::complex<float>
-	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[6]));
+	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[1]);
+	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[2]));
+	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[3])); // Actually std::complex<float>
+	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
 
 	const uint32_t noOfImages = STARPU_VECTOR_GET_NX(buffers[0]);
 
@@ -927,7 +831,6 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 				processBufferGPU<0, true>(outVolumeBuffer, outWeightsBuffer,
 				                          arg.fftSizeX, arg.fftSizeY,
 				                          arg.noOfSymmetries * noOfImages, inSpaces,
-				                          arg.hasCTF, inCTFs, inModulators,
 				                          inFFTs,
 				                          inBlobTableSqrt,
 				                          arg.fastLateBlobbing,
@@ -936,7 +839,6 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 				processBufferGPU<0, false>(outVolumeBuffer, outWeightsBuffer,
 				                           arg.fftSizeX, arg.fftSizeY,
 				                           arg.noOfSymmetries * noOfImages, inSpaces,
-				                           arg.hasCTF, inCTFs, inModulators,
 				                           inFFTs,
 				                           inBlobTableSqrt,
 				                           arg.fastLateBlobbing,
@@ -947,7 +849,6 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 			processBufferGPU<1, false>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing,
@@ -957,7 +858,6 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 			processBufferGPU<2, false>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing,
@@ -967,7 +867,6 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 			processBufferGPU<3, false>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing,
@@ -977,7 +876,6 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 			processBufferGPU<4, false>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing,
@@ -993,20 +891,15 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 //------------------------------------------------ CPU -----------------------------------------------------------------
 // uses copies of the GPU functions, rewritten for single thread runtime
 
-template<bool hasCTF>
 void processVoxelCPU(
 		float2* const tempVolumeGPU, float* const tempWeightsGPU,
 		const int x, const int y, const int z,
 		const int xSize, const int ySize,
-		const float* const __restrict__ CTF,
-		const float* const __restrict__ modulator,
 		const float2* const __restrict__ FFT,
 		const RecFourierProjectionTraverseSpace* const space)
 {
 	Point3D<float> imgPos;
 	float wBlob = 1.f;
-	float wCTF = 1.f;
-	float wModulator = 1.f;
 
 	float dataWeight = space->weight;
 
@@ -1029,26 +922,19 @@ void processVoxelCPU(
 	int index3D = z * (cpuC.cMaxVolumeIndexYZ+1) * (cpuC.cMaxVolumeIndexX+1) + y * (cpuC.cMaxVolumeIndexX+1) + x;
 	int index2D = imgY * xSize + imgX;
 
-	if (hasCTF) {
-		wCTF = CTF[index2D];
-		wModulator = modulator[index2D];
-	}
-
-	float weight = wBlob * wModulator * dataWeight;
+	float weight = wBlob * dataWeight;
 
 	// use atomic as two blocks can write to same voxel
-	tempVolumeGPU[index3D].x += FFT[index2D].x * weight * wCTF;
-	tempVolumeGPU[index3D].y += FFT[index2D].y * weight * wCTF;
+	tempVolumeGPU[index3D].x += FFT[index2D].x * weight;
+	tempVolumeGPU[index3D].y += FFT[index2D].y * weight;
 	tempWeightsGPU[index3D] += weight;
 }
 
-template<bool hasCTF, int blobOrder, bool useFastKaiser, bool usePrecomputedInterpolation>
+template<int blobOrder, bool useFastKaiser, bool usePrecomputedInterpolation>
 void processVoxelBlobCPU(
 		float2* const tempVolumeGPU, float* const tempWeightsGPU,
 		const int x, const int y, const int z,
 		const int xSize, const int ySize,
-		const float* const __restrict__ CTF,
-		const float* const __restrict__ modulator,
 		const float2* const __restrict__ FFT,
 		const RecFourierProjectionTraverseSpace* const space,
 		const float* blobTableSqrt)
@@ -1088,65 +974,31 @@ void processVoxelBlobCPU(
 	vol.x = vol.y = w = 0.f;
 	float dataWeight = space->weight;
 
-	// ugly spaghetti code, but improves performance by app. 10%
-	if (hasCTF) {
-		// check which pixel in the vicinity should contribute
-		for (int i = minY; i <= maxY; i++) {
-			float ySqr = (imgPos.y - i) * (imgPos.y - i);
-			float yzSqr = ySqr + zSqr;
-			if (yzSqr > radiusSqr) continue;
-			for (int j = minX; j <= maxX; j++) {
-				float xD = imgPos.x - j;
-				float distanceSqr = xD*xD + yzSqr;
-				if (distanceSqr > radiusSqr) continue;
+	// check which pixel in the vicinity should contribute
+	for (int i = minY; i <= maxY; i++) {
+		float ySqr = (imgPos.y - i) * (imgPos.y - i);
+		float yzSqr = ySqr + zSqr;
+		if (yzSqr > radiusSqr) continue;
+		for (int j = minX; j <= maxX; j++) {
+			float xD = imgPos.x - j;
+			float distanceSqr = xD*xD + yzSqr;
+			if (distanceSqr > radiusSqr) continue;
 
-				int index2D = i * xSize + j;
+			int index2D = i * xSize + j;
 
-				float wCTF = CTF[index2D];
-				float wModulator = modulator[index2D];
-
-				float wBlob;
-				if (usePrecomputedInterpolation) {
-					int aux = (int) ((distanceSqr * cpuC.cIDeltaSqrt + 0.5f));
-					wBlob = blobTableSqrt[aux];
-				} else if (useFastKaiser) {
-					wBlob = kaiserValueFast(distanceSqr);
-				} else {
-					wBlob = kaiserValue<blobOrder>(sqrtf(distanceSqr), cpuC.cBlobRadius) * cpuC.cIw0;
-				}
-
-				float weight = wBlob * wModulator * dataWeight;
-				w += weight;
-				vol += FFT[index2D] * weight * wCTF;
+			float wBlob;
+			if (usePrecomputedInterpolation) {
+				int aux = (int) ((distanceSqr * cpuC.cIDeltaSqrt + 0.5f));
+				wBlob = blobTableSqrt[aux];
+			} else if (useFastKaiser) {
+				wBlob = kaiserValueFast(distanceSqr);
+			} else {
+				wBlob = kaiserValue<blobOrder>(sqrtf(distanceSqr), cpuC.cBlobRadius) * cpuC.cIw0;
 			}
-		}
-	} else {
-		// check which pixel in the vicinity should contribute
-		for (int i = minY; i <= maxY; i++) {
-			float ySqr = (imgPos.y - i) * (imgPos.y - i);
-			float yzSqr = ySqr + zSqr;
-			if (yzSqr > radiusSqr) continue;
-			for (int j = minX; j <= maxX; j++) {
-				float xD = imgPos.x - j;
-				float distanceSqr = xD*xD + yzSqr;
-				if (distanceSqr > radiusSqr) continue;
 
-				int index2D = i * xSize + j;
-
-				float wBlob;
-				if (usePrecomputedInterpolation) {
-					int aux = (int) ((distanceSqr * cpuC.cIDeltaSqrt + 0.5f));
-					wBlob = blobTableSqrt[aux];
-				} else if (useFastKaiser) {
-					wBlob = kaiserValueFast(distanceSqr);
-				} else {
-					wBlob = kaiserValue<blobOrder>(sqrtf(distanceSqr), cpuC.cBlobRadius) * cpuC.cIw0;
-				}
-
-				float weight = wBlob * dataWeight;
-				w += weight;
-				vol += FFT[index2D] * weight;
-			}
+			float weight = wBlob * dataWeight;
+			w += weight;
+			vol += FFT[index2D] * weight;
 		}
 	}
 
@@ -1155,12 +1007,10 @@ void processVoxelBlobCPU(
 	tempWeightsGPU[index3D] += w;
 }
 
-template<bool useFast, bool hasCTF, int blobOrder, bool useFastKaiser, bool usePrecomputedInterpolation>
+template<bool useFast, int blobOrder, bool useFastKaiser, bool usePrecomputedInterpolation>
 void processProjectionCPU(
 		float2* tempVolumeGPU, float *tempWeightsGPU,
 		const int xSize, const int ySize,
-		const float* __restrict__ CTF,
-		const float* __restrict__ modulator,
 		const float2* __restrict__ FFT,
 		const RecFourierProjectionTraverseSpace* const tSpace,
 		const float* blobTableSqrt) {
@@ -1171,7 +1021,7 @@ void processProjectionCPU(
 				if (useFast) {
 					float hitZ = getZ(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin);
 					int z = (int)(hitZ + 0.5f); // rounding
-					processVoxelCPU<hasCTF>(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize , CTF, modulator, FFT, tSpace);
+					processVoxelCPU(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize, FFT, tSpace);
 				} else {
 					float z1 = getZ(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin); // lower plane
 					float z2 = getZ(idx, idy, tSpace->unitNormal, tSpace->topOrigin); // upper plane
@@ -1180,7 +1030,7 @@ void processProjectionCPU(
 					int lower = static_cast<int>(floorf(fminf(z1, z2)));
 					int upper = static_cast<int>(ceilf(fmaxf(z1, z2)));
 					for (int z = lower; z <= upper; z++) {
-						processVoxelBlobCPU<hasCTF, blobOrder, useFastKaiser, usePrecomputedInterpolation>(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize , CTF, modulator, FFT, tSpace, blobTableSqrt);
+						processVoxelBlobCPU<blobOrder, useFastKaiser, usePrecomputedInterpolation>(tempVolumeGPU, tempWeightsGPU, idx, idy, z, xSize, ySize, FFT, tSpace, blobTableSqrt);
 					}
 				}
 			}
@@ -1191,7 +1041,7 @@ void processProjectionCPU(
 				if (useFast) {
 					float hitY =getY(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin);
 					int y = (int)(hitY + 0.5f); // rounding
-					processVoxelCPU<hasCTF>(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize , CTF, modulator, FFT, tSpace);
+					processVoxelCPU(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize, FFT, tSpace);
 				} else {
 					float y1 = getY(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin); // lower plane
 					float y2 = getY(idx, idy, tSpace->unitNormal, tSpace->topOrigin); // upper plane
@@ -1200,7 +1050,7 @@ void processProjectionCPU(
 					int lower = static_cast<int>(floorf(fminf(y1, y2)));
 					int upper = static_cast<int>(ceilf(fmaxf(y1, y2)));
 					for (int y = lower; y <= upper; y++) {
-						processVoxelBlobCPU<hasCTF, blobOrder, useFastKaiser, usePrecomputedInterpolation>(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize , CTF, modulator, FFT, tSpace, blobTableSqrt);
+						processVoxelBlobCPU<blobOrder, useFastKaiser, usePrecomputedInterpolation>(tempVolumeGPU, tempWeightsGPU, idx, y, idy, xSize, ySize, FFT, tSpace, blobTableSqrt);
 					}
 				}
 			}
@@ -1211,7 +1061,7 @@ void processProjectionCPU(
 				if (useFast) {
 					float hitX = getX(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin);
 					int x = (int)(hitX + 0.5f); // rounding
-					processVoxelCPU<hasCTF>(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize , CTF, modulator, FFT, tSpace);
+					processVoxelCPU(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize, FFT, tSpace);
 				} else {
 					float x1 = getX(idx, idy, tSpace->unitNormal, tSpace->bottomOrigin); // lower plane
 					float x2 = getX(idx, idy, tSpace->unitNormal, tSpace->topOrigin); // upper plane
@@ -1220,7 +1070,7 @@ void processProjectionCPU(
 					int lower = static_cast<int>(floorf(fminf(x1, x2)));
 					int upper = static_cast<int>(ceilf(fmaxf(x1, x2)));
 					for (int x = lower; x <= upper; x++) {
-						processVoxelBlobCPU<hasCTF, blobOrder, useFastKaiser, usePrecomputedInterpolation>(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize , CTF, modulator, FFT, tSpace, blobTableSqrt);
+						processVoxelBlobCPU<blobOrder, useFastKaiser, usePrecomputedInterpolation>(tempVolumeGPU, tempWeightsGPU, x, idx, idy, xSize, ySize, FFT, tSpace, blobTableSqrt);
 					}
 				}
 			}
@@ -1233,7 +1083,6 @@ void processBufferCPU(
 		float2 *outVolumeBuffer, float *outWeightsBuffer,
 		const int fftSizeX, const int fftSizeY,
 		const int traverseSpaceCount, const RecFourierProjectionTraverseSpace *traverseSpaces,
-		const bool hasCTFs, const float *CTFs, const float *modulators,
 		const float2 *inFFTs,
 		const float *blobTableSqrt,
 		const bool fastLateBlobbing) {
@@ -1241,47 +1090,23 @@ void processBufferCPU(
 	for (int i = 0; i < traverseSpaceCount; ++i) {
 		const RecFourierProjectionTraverseSpace &space = traverseSpaces[i];
 
-		const float* spaceCTF = CTFs + fftSizeX * fftSizeY * space.projectionIndex;
-		const float* spaceModulators = modulators + fftSizeX * fftSizeY * space.projectionIndex;
 		const float2* spaceFFT = inFFTs + fftSizeX * fftSizeY * space.projectionIndex;
 
 		// by using templates, we can save some registers, especially for 'fast' version
-		if (fastLateBlobbing && hasCTFs) {
-			processProjectionCPU<true, true, blobOrder, useFastKaiser, usePrecomputedInterpolation>(
+		if (fastLateBlobbing) {
+			processProjectionCPU<true, blobOrder, useFastKaiser, usePrecomputedInterpolation>(
 					outVolumeBuffer, outWeightsBuffer,
 					fftSizeX, fftSizeY,
-					spaceCTF, spaceModulators, spaceFFT,
+					spaceFFT,
 					&space,
 					blobTableSqrt);
-			continue;
-		}
-		if (fastLateBlobbing && !hasCTFs) {
-			processProjectionCPU<true, false, blobOrder, useFastKaiser, usePrecomputedInterpolation>(
+		} else {
+			processProjectionCPU<false, blobOrder, useFastKaiser, usePrecomputedInterpolation>(
 					outVolumeBuffer, outWeightsBuffer,
 					fftSizeX, fftSizeY,
-					spaceCTF, spaceModulators, spaceFFT,
+					spaceFFT,
 					&space,
 					blobTableSqrt);
-			continue;
-		}
-		// if making copy of the image in shared memory, allocate enough space
-		if (!fastLateBlobbing && hasCTFs) {
-			processProjectionCPU<false, true, blobOrder, useFastKaiser, usePrecomputedInterpolation>(
-					outVolumeBuffer, outWeightsBuffer,
-					fftSizeX, fftSizeY,
-					spaceCTF, spaceModulators, spaceFFT,
-					&space,
-					blobTableSqrt);
-			continue;
-		}
-		if (!fastLateBlobbing && !hasCTFs) {
-			processProjectionCPU<false, false, blobOrder, useFastKaiser, usePrecomputedInterpolation>(
-					outVolumeBuffer, outWeightsBuffer,
-					fftSizeX, fftSizeY,
-					spaceCTF, spaceModulators, spaceFFT,
-					&space,
-					blobTableSqrt);
-			continue;
 		}
 	}
 }
@@ -1290,12 +1115,10 @@ template<bool usePrecomputedInterpolation>
 void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 	const ReconstructFftArgs& arg = *(ReconstructFftArgs*) cl_arg;
 	const float2* inFFTs = (float2*)STARPU_VECTOR_GET_PTR(buffers[0]);
-	const float* inCTFs = arg.hasCTF ? (float*)STARPU_VECTOR_GET_PTR(buffers[1]) : nullptr;
-	const float* inModulators = arg.hasCTF ? (float*)STARPU_VECTOR_GET_PTR(buffers[2]) : nullptr;
-	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[3]);
-	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
-	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[5])); // Actually std::complex<float>
-	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[6]));
+	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[1]);
+	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[2]));
+	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[3])); // Actually std::complex<float>
+	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
 
 	const uint32_t noOfImages = STARPU_VECTOR_GET_NX(buffers[0]);
 
@@ -1305,7 +1128,6 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 				processBufferCPU<0, true, usePrecomputedInterpolation>(outVolumeBuffer, outWeightsBuffer,
 				                          arg.fftSizeX, arg.fftSizeY,
 				                          arg.noOfSymmetries * noOfImages, inSpaces,
-				                          arg.hasCTF, inCTFs, inModulators,
 				                          inFFTs,
 				                          inBlobTableSqrt,
 				                          arg.fastLateBlobbing);
@@ -1313,7 +1135,6 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 				processBufferCPU<0, false, usePrecomputedInterpolation>(outVolumeBuffer, outWeightsBuffer,
 				                           arg.fftSizeX, arg.fftSizeY,
 				                           arg.noOfSymmetries * noOfImages, inSpaces,
-				                           arg.hasCTF, inCTFs, inModulators,
 				                           inFFTs,
 				                           inBlobTableSqrt,
 				                           arg.fastLateBlobbing);
@@ -1323,7 +1144,6 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 			processBufferCPU<1, false, usePrecomputedInterpolation>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing);
@@ -1332,7 +1152,6 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 			processBufferCPU<2, false, usePrecomputedInterpolation>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing);
@@ -1341,7 +1160,6 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 			processBufferCPU<3, false, usePrecomputedInterpolation>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing);
@@ -1350,7 +1168,6 @@ void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 			processBufferCPU<4, false, usePrecomputedInterpolation>(outVolumeBuffer, outWeightsBuffer,
 			                           arg.fftSizeX, arg.fftSizeY,
 			                           arg.noOfSymmetries * noOfImages, inSpaces,
-			                           arg.hasCTF, inCTFs, inModulators,
 			                           inFFTs,
 			                           inBlobTableSqrt,
 			                           arg.fastLateBlobbing);

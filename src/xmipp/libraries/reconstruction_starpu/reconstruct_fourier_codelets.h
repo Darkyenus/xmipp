@@ -43,20 +43,6 @@
  *  Holds 'right side of the centered FFT', i.e. only unique values, with high frequencies in the corners
  */
 
-/* CTFs Buffer
- * ===========
- *      float['batchSize' * ('fftSizeX' * 'fftSizeY')]
- * May be null, together with `modulators`, if not enabled.
- * CTF correction data for each pixel of FFT.
- */
-
-/* Modulators Buffer
- * =================
- *      float['batchSize' * ('fftSizeX' * 'fftSizeY')]
- * May be null, together with `CTFs`, if not enabled.
- * Correction data for each pixel of FFT.
- */
-
 /* Spaces Buffer
  *      RecFourierProjectionTraverseSpace['batchSize' * 'noOfSymmetries']
  *          but only 'noOfImages' is valid
@@ -107,10 +93,6 @@ struct LoadProjectionArgs {
 	const uint32_t maxVolumeIndexX, maxVolumeIndexYZ;
 	const float blobRadius;
 	const bool fastLateBlobbing;
-	const bool hasCTF;
-	const double iTs;
-	const double minCTF;
-	const bool isPhaseFlipped;
 
 	/** Size of source bitmap images. (Regardless of their actual size, they are all padded to this size) */
 	uint32_t paddedImageSize;
@@ -133,7 +115,6 @@ struct ReconstructFftArgs {
 	bool fastLateBlobbing;
 	int blobOrder;
 	float blobAlpha;
-	bool hasCTF;
 
 	/** Amount of symmetries in the image. See Spaces Buffer. */
 	uint32_t noOfSymmetries;

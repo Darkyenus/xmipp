@@ -69,16 +69,9 @@ void ProgRecFourierStarPU::defineParams() {
 	addParamsLine("                                 : radius in pixels, order of Bessel function in blob and parameter alpha");
 	addParamsLine("  [--fast]                       : Do the blobbing at the end of the computation.");
 	addParamsLine("                                 : Gives slightly different results, but is faster.");
-	addParamsLine("  [--useCTF]                     : Use CTF information if present. Note that this increases memory requirements.");//constant transfer function
-	addParamsLine("  [--sampling <Ts=1>]            : sampling rate of the input images in Angstroms/pixel");
-	addParamsLine("                                 : It is only used when correcting for the CTF");
-	addParamsLine("  [--phaseFlipped]               : Give this flag if images have been already phase flipped");
-	addParamsLine("  [--minCTF <ctf=0.01>]          : Minimum value of the CTF that will be inverted");
-	addParamsLine("                                 : CTF values (in absolute value) below this one will not be corrected");
 	addParamsLine("  [--batchSize <size=25>]        : Amount of images in single batch. Too many won't fit in memory and will not be able to run as fast, too few will have large overhead.");
 	addParamsLine("                                 : Each additional image in batch will require at least imageSide^2 * 32 bytes, e.g.");
 	addParamsLine("                                 : cca 52MB per batch of 25 256x256 images or 210MB for 512x512 images.");
-	addParamsLine("                                 : If CTF is enabled, multiply above figures by 2.");
 	addParamsLine("  [--fourierThreads <num=0>]     : Number of threads used for final fourier transformation. Zero means all available.");
 	addExampleLine("For reconstruct enforcing i3 symmetry and using stored weights:", false);
 	addExampleLine("   xmipp_starpu_reconstruct_fourier  -i reconstruction.sel --sym i3 --weight");
@@ -91,8 +84,6 @@ void ProgRecFourierStarPU::defineParams() {
 	 *      batchSize * fftSizeX * fftSizeY * 2 * sizeof(float)
 	 *  fftWorkSpace:
 	 *      paddedImgSize * paddedImgSize/2 * sizeof(float) * 2     <- Does not scale with batchSize
-	 *  ctf:
-	 *      2 * batchSize * fftSizeX * fftSizeY * sizeof(float)
 	 */
 }
 
@@ -111,12 +102,6 @@ void ProgRecFourierStarPU::readParams() {
 	params.blob.alpha  = getDoubleParam("--blob", 2);
 	params.fastLateBlobbing = checkParam("--fast");
 
-	params.useCTF = checkParam("--useCTF");
-	if (params.useCTF)
-		params.iTs = 1.0 / getDoubleParam("--sampling");
-
-	params.isPhaseFlipped = checkParam("--phaseFlipped");
-	params.minCTF = getDoubleParam("--minCTF");
 	int batchSize = getIntParam("--batchSize");
 	params.batchSize = batchSize <= 0 ? 25 : static_cast<uint32_t>(batchSize);
 
@@ -227,11 +212,6 @@ void ProgRecFourierStarPU::show() const {
 		std::cout << " Use weights stored in the image headers or doc file" << std::endl;
 	else
 		std::cout << " Do NOT use weights" << std::endl;
-	if (params.useCTF)
-		std::cout << "Using CTF information" << std::endl
-		          << "Sampling rate: " << 1.0 / params.iTs << std::endl
-		          << "Phase flipped: " << params.isPhaseFlipped << std::endl
-		          << "Minimum CTF: " << params.minCTF << std::endl;
 	std::cout << "\n Interpolation Function"
 	          << "\n   blrad                 : "  << params.blob.radius
 	          << "\n   blord                 : "  << params.blob.order
@@ -326,7 +306,6 @@ struct ProgRecFourierStarPU::CompleteBatchTasks {
 	uint32_t paddedImgSize;
 	uint32_t* loadedBatchSize;
 	starpu_data_handle_t paddedImagesDataHandle, traverseSpacesHandle;
-	starpu_data_handle_t ctfHandle, modulatorsHandle;
 	starpu_data_handle_t blobTableSquaredHandle;
 	starpu_data_handle_t resultVolumeHandle, resultWeightsHandle;
 
@@ -342,8 +321,6 @@ struct ProgRecFourierStarPU::CompleteBatchTasks {
 			// If this whole batch has been eliminated, exit
 			starpu_data_unregister_submit(arg.paddedImagesDataHandle);
 			starpu_data_unregister_submit(arg.traverseSpacesHandle);
-			starpu_data_unregister_submit(arg.ctfHandle);
-			starpu_data_unregister_submit(arg.modulatorsHandle);
 
 			BatchProvider::batchCompleted(arg.progressTracker);
 			return;
@@ -411,12 +388,10 @@ struct ProgRecFourierStarPU::CompleteBatchTasks {
 			reconstructFftTask->name = "ReconstructFFT";
 			reconstructFftTask->cl = &codelet.reconstruct_fft;
 			reconstructFftTask->handles[0] = fftHandle;
-			reconstructFftTask->handles[1] = arg.ctfHandle;//TODO Also partition?
-			reconstructFftTask->handles[2] = arg.modulatorsHandle;//TODO Also partition?
-			reconstructFftTask->handles[3] = partitionedTraverseSpacesHandle ? partitionedTraverseSpacesHandle : arg.traverseSpacesHandle;
-			reconstructFftTask->handles[4] = arg.blobTableSquaredHandle;
-			reconstructFftTask->handles[5] = arg.resultVolumeHandle;
-			reconstructFftTask->handles[6] = arg.resultWeightsHandle;
+			reconstructFftTask->handles[1] = partitionedTraverseSpacesHandle ? partitionedTraverseSpacesHandle : arg.traverseSpacesHandle;
+			reconstructFftTask->handles[2] = arg.blobTableSquaredHandle;
+			reconstructFftTask->handles[3] = arg.resultVolumeHandle;
+			reconstructFftTask->handles[4] = arg.resultWeightsHandle;
 			reconstructFftTask->cl_arg = arg.reconstructFftArg;
 			reconstructFftTask->cl_arg_size = sizeof(ReconstructFftArgs);
 			reconstructFftTask->cl_arg_free = 0;
@@ -434,8 +409,6 @@ struct ProgRecFourierStarPU::CompleteBatchTasks {
 			starpu_data_partition_clean(arg.traverseSpacesHandle, 1, &partitionedTraverseSpacesHandle);
 		}
 		starpu_data_unregister_submit(arg.traverseSpacesHandle);
-		starpu_data_unregister_submit(arg.ctfHandle);
-		starpu_data_unregister_submit(arg.modulatorsHandle);
 	}
 };
 
@@ -468,7 +441,6 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 
 	std::vector<size_t> selFileObjectIds;
 	SF.findObjects(selFileObjectIds);
-	const bool hasCTF = params.useCTF && (SF.containsLabel(MDL_CTF_MODEL) || SF.containsLabel(MDL_CTF_DEFOCUSU));
 	const uint32_t fftSizeX = maxVolumeIndex / 2;
 	const uint32_t fftSizeY = maxVolumeIndex;
 
@@ -484,7 +456,6 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 			params.fastLateBlobbing,
 			params.blob.order,
 			static_cast<float>(params.blob.alpha),
-			hasCTF,
 			static_cast<uint32_t>(computeConstants.R_symmetries.size()),
 			fftSizeX, fftSizeY
 	};
@@ -554,8 +525,6 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 				maxVolumeIndex, maxVolumeIndex,
 				static_cast<float>(params.blob.radius),
 				params.fastLateBlobbing,
-				hasCTF,
-				params.iTs, params.minCTF, params.isPhaseFlipped,
 				paddedImgSize,
 				fftSizeX, fftSizeY
 		});
@@ -569,21 +538,6 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		starpu_data_handle_t amountLoadedHandle = {0};
 		starpu_variable_data_register(&amountLoadedHandle, STARPU_MAIN_RAM, (uintptr_t) &amountLoaded, sizeof(amountLoaded));
 		starpu_data_set_name(amountLoadedHandle, "Batch Meta Data");
-
-		starpu_data_handle_t ctfHandle = {0};
-		starpu_data_handle_t modulatorsHandle = {0};
-		if (hasCTF) {
-			// Created without initial backing memory
-			starpu_vector_data_register(&ctfHandle, -1, 0, currentBatchSize, fftSizeX * fftSizeY * sizeof(float));
-			starpu_vector_data_register(&modulatorsHandle, -1, 0, currentBatchSize, fftSizeX * fftSizeY * sizeof(float));
-		} else {
-			// Created without initial backing memory as 1b-sized "null-objects"
-			// (StarPU does not like null-handles nor 0b-sized buffers)
-			starpu_vector_data_register(&ctfHandle, -1, 0, 1, 1);
-			starpu_vector_data_register(&modulatorsHandle, -1, 0, 1, 1);
-		}
-		starpu_data_set_name(ctfHandle, "Batch CTF Data");
-		starpu_data_set_name(modulatorsHandle, "Batch Modulators Data");
 
 		starpu_data_handle_t paddedImagesDataHandle = {0};
 		starpu_vector_data_register(&paddedImagesDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float)));
@@ -601,10 +555,8 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		loadProjectionsTask->cl_arg_size = sizeof(loadProjectionArg);
 		loadProjectionsTask->cl_arg_free = 0; // Do not free! (probably default)
 		loadProjectionsTask->handles[0] = amountLoadedHandle;
-		loadProjectionsTask->handles[1] = ctfHandle;
-		loadProjectionsTask->handles[2] = modulatorsHandle;
-		loadProjectionsTask->handles[3] = paddedImagesDataHandle;
-		loadProjectionsTask->handles[4] = traverseSpacesHandle;
+		loadProjectionsTask->handles[1] = paddedImagesDataHandle;
+		loadProjectionsTask->handles[2] = traverseSpacesHandle;
 		loadProjectionsTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
 
 		CompleteBatchTasks *arg = static_cast<CompleteBatchTasks *>(malloc(sizeof(CompleteBatchTasks)));
@@ -616,8 +568,6 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		arg->loadedBatchSize = &amountLoaded.noOfImages;
 		arg->paddedImagesDataHandle = paddedImagesDataHandle;
 		arg->traverseSpacesHandle = traverseSpacesHandle;
-		arg->ctfHandle = ctfHandle;
-		arg->modulatorsHandle = modulatorsHandle;
 		arg->blobTableSquaredHandle = blobTableSquaredHandle;
 		arg->resultVolumeHandle = resultVolumeHandle;
 		arg->resultWeightsHandle = resultWeightsHandle;

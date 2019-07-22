@@ -38,16 +38,12 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 	const LoadProjectionArgs& arg = *static_cast<LoadProjectionArgs*>(cl_arg);
 
 	LoadProjectionAmountLoaded& amountLoaded = *((LoadProjectionAmountLoaded*)STARPU_VARIABLE_GET_PTR(buffers[0]));
-	float* outCTFs = arg.hasCTF ? (float*)STARPU_VECTOR_GET_PTR(buffers[1]) : nullptr;
-	float* outModulators = arg.hasCTF ? (float*)STARPU_VECTOR_GET_PTR(buffers[2]) : nullptr;
-	float* outImageData = (float*)STARPU_VECTOR_GET_PTR(buffers[3]);
-	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[3]) / sizeof(float);
-	RecFourierProjectionTraverseSpace* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[4]);
+	float* outImageData = (float*)STARPU_VECTOR_GET_PTR(buffers[1]);
+	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float);
+	RecFourierProjectionTraverseSpace* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[2]);
 
 	ApplyGeoParams geoParams;
 	geoParams.only_apply_shifts = true;
-
-	const int fftDataSize = arg.fftSizeX * arg.fftSizeY;
 
 	MultidimArray<float> paddedImageData; // Declared here so that internal allocated memory can be reused
 
@@ -104,13 +100,6 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 		CenterFFT(paddedImageData, true);
 
 		memcpy(outImageData + projectionIndex * outImageDataStride, paddedImageData.data, paddedImageData.getSize() * sizeof(float));
-
-		if (arg.hasCTF) {
-			computeCTFCorrection(arg.selFile, arg.fftSizeX, arg.fftSizeY, imageObjectIndex,
-			                     outCTFs + projectionIndex * fftDataSize,
-			                     outModulators + projectionIndex * fftDataSize,
-			                     arg.paddedImageSize, arg.iTs, arg.minCTF, arg.isPhaseFlipped);
-		}
 
 		projectionIndex++;
 	}

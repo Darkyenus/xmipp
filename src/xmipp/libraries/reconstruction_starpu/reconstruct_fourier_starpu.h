@@ -74,18 +74,6 @@ protected:
 		/** If true, blobbing is done at the end of the computation. This is less accurate, but faster. */
 		bool fastLateBlobbing;
 
-		/** Use CTF */
-		bool useCTF;
-
-		/** Inverse of the sampling rate */
-		double iTs;
-
-		/** True if the images have been already phase flipped */
-		bool isPhaseFlipped;
-
-		/** Minimum CTF value to invert */
-		double minCTF;
-
 		/** Number of threads to be used for final fourier transformation */
 		uint32_t fourierTransformThreads;
 
