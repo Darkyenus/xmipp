@@ -234,6 +234,11 @@ static void rfs_remove_workers(unsigned sched_ctx_id, int *workerids, unsigned n
 	}
 }
 
+/** The amount of tasks in a queue which are to be prefetched for the worker.
+ * Prefetch happens when adding to a queue or when removing from a queue.
+ * Stealing workers should aim to steal those tasks, which are not prefetched. */
+static const int PREFETCH_TASK_COUNT = 2;
+
 static int rfs_push_task(starpu_task * task) {
 	const unsigned sched_ctx_id = task->sched_ctx;
 	//RFS_LOG("%s (%s)", task->name, task->cl->name);
@@ -253,6 +258,7 @@ static int rfs_push_task(starpu_task * task) {
 
 	pickedWorkerData.workerMutex.lock();
 	pickedWorkerData.queue.addLast(taskData);
+	auto queuedTaskCount = pickedWorkerData.queue.getSize();
 	pickedWorkerData.queued_load += taskData.best_implementation_time_by_worker[pickedWorkerId];
 #if RFS_LOGGING
 	assert(pickedWorkerData.isQueuedLoadCorrect(pickedWorkerId));
@@ -261,7 +267,9 @@ static int rfs_push_task(starpu_task * task) {
 	pickedWorkerData.workerMutex.unlock();
 
 	starpu_push_task_end(task);
-	starpu_idle_prefetch_task_input_for(task, pickedWorkerId);
+	if (queuedTaskCount <= PREFETCH_TASK_COUNT) {
+		starpu_idle_prefetch_task_input_for(task, pickedWorkerId);
+	}
 	starpu_wake_worker_locked(pickedWorkerId);
 	starpu_worker_unlock(pickedWorkerId);
 
@@ -516,6 +524,11 @@ static starpu_task * rfs_pop_task(unsigned sched_ctx_id) {
 	ourWorkerData.queued_load -= taskTime;
 	ourWorkerData.current_load = taskTime;
 	ourWorkerData.queue.removeFirst();
+
+	// Prefetch more
+	for (int t = 0; t < PREFETCH_TASK_COUNT && t < ourWorkerData.queue.getSize(); ++t) {
+		starpu_idle_prefetch_task_input_for(ourWorkerData.queue[t].task, workerId);
+	}
 
 #if RFS_LOGGING
 	assert(ourWorkerData.isQueuedLoadCorrect(workerId));
