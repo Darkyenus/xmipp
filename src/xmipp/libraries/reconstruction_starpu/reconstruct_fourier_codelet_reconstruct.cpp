@@ -24,6 +24,7 @@
  *  e-mail address 'xmipp@cnb.csic.es'
  ***************************************************************************/
 
+#include <atomic>
 #include <core/multidim_array.h>
 #include <core/xmipp_fft.h>
 #include <core/xmipp_fftw.h>
@@ -816,7 +817,7 @@ void processBufferGPU(
 void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 	const ReconstructFftArgs& arg = *(ReconstructFftArgs*) cl_arg;
 	const float2* inFFTs = (float2*)STARPU_VECTOR_GET_PTR(buffers[0]);
-	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[1]);
+	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_MATRIX_GET_PTR(buffers[1]);
 	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[2]));
 	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[3])); // Actually std::complex<float>
 	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));
@@ -888,6 +889,27 @@ void func_reconstruct_cuda(void* buffers[], void* cl_arg) {
 //------------------------------------------------ CPU -----------------------------------------------------------------
 // uses copies of the GPU functions, rewritten for single thread runtime
 
+/** Atomically increments the value pointed at by ptr by value.
+ * Uses relaxed memory model with no reordering guarantees. */
+void atomicAddFloat(volatile float* ptr, float addedValue) {
+	static_assert(sizeof(float) == sizeof(uint32_t), "atomicAddFloat requires floats to be 32bit");
+
+	// This is probably fine, since the constructor/destructor should be trivial
+	// (As of C++11, this is guaranteed only for integral type specializations, but it is probably reasonably safe to assume
+	// that this will hold for floats as well. C++20 requies that by spec.)
+	volatile std::atomic<float>& atomicPtr = *reinterpret_cast<volatile std::atomic<float>*>(ptr);
+	float current = atomicPtr.load(std::memory_order::memory_order_relaxed);
+	while (true) {
+		const float newValue = current + addedValue;
+		// Since x86 does not allow atomic add of floats (only integers), we have to implement it through CAS
+		if (atomicPtr.compare_exchange_weak(current, newValue, std::memory_order::memory_order_relaxed)) {
+			// Current was still current and was replaced with the newValue. Done.
+			return;
+		}
+		// Comparison failed. current now contains the new value and we try again.
+	}
+}
+
 void processVoxelCPU(
 		float2* const tempVolumeGPU, float* const tempWeightsGPU,
 		const int x, const int y, const int z,
@@ -922,9 +944,12 @@ void processVoxelCPU(
 	float weight = wBlob * dataWeight;
 
 	// use atomic as two blocks can write to same voxel
-	tempVolumeGPU[index3D].x += FFT[index2D].x * weight;
-	tempVolumeGPU[index3D].y += FFT[index2D].y * weight;
-	tempWeightsGPU[index3D] += weight;
+	atomicAddFloat(&tempVolumeGPU[index3D].x, FFT[index2D].x * weight);
+	atomicAddFloat(&tempVolumeGPU[index3D].y, FFT[index2D].y * weight);
+	atomicAddFloat(&tempWeightsGPU[index3D], weight);
+	//tempVolumeGPU[index3D].x += FFT[index2D].x * weight;
+	//tempVolumeGPU[index3D].y += FFT[index2D].y * weight;
+	//tempWeightsGPU[index3D] += weight;
 }
 
 template<int blobOrder, bool useFastKaiser, bool usePrecomputedInterpolation>
@@ -1115,7 +1140,7 @@ template<bool usePrecomputedInterpolation>
 void func_reconstruct_cpu_template(void* buffers[], void* cl_arg) {
 	const ReconstructFftArgs& arg = *(ReconstructFftArgs*) cl_arg;
 	const float2* inFFTs = (float2*)STARPU_VECTOR_GET_PTR(buffers[0]);
-	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[1]);
+	const RecFourierProjectionTraverseSpace* inSpaces = (RecFourierProjectionTraverseSpace*)STARPU_MATRIX_GET_PTR(buffers[1]);
 	const float* inBlobTableSqrt = (float*)(STARPU_VECTOR_GET_PTR(buffers[2]));
 	float2* outVolumeBuffer = (float2*)(STARPU_VECTOR_GET_PTR(buffers[3])); // Actually std::complex<float>
 	float* outWeightsBuffer = (float*)(STARPU_VECTOR_GET_PTR(buffers[4]));

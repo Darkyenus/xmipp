@@ -48,6 +48,7 @@
 #include <starpu.h>
 
 #include "reconstruct_fourier_codelets.h"
+#include "reconstruct_fourier_scheduler.h"
 #include "reconstruct_fourier_util.h"
 #include "reconstruct_fourier_starpu_util.h"
 
@@ -300,10 +301,22 @@ void ProgRecFourierStarPU::initStarPU() {
 	setenv("STARPU_NWORKER_PER_CUDA",
 	       "2" /* seems to work best, 1 leaves GPU idle for fractions of a second (but shouldn't) */,
 	       false /* don't overwrite user specified value */);
+	// Be more reluctant to discard calibration data
+	setenv("STARPU_HISTORY_MAX_ERROR", "200" /*%*/, false);
 
 	starpu_conf starpu_configuration;
 	starpu_conf_init(&starpu_configuration);
+	starpu_configuration.sched_policy = &schedulers.reconstruct_fourier;
 	CHECK_STARPU(starpu_init(&starpu_configuration));
+
+	int cpuWorkers[STARPU_NMAXWORKERS];
+	unsigned cpuWorkerCount = starpu_worker_get_ids_by_type(starpu_worker_archtype::STARPU_CPU_WORKER, cpuWorkers, STARPU_NMAXWORKERS);
+	if (cpuWorkerCount > 1) {
+		int combinedWorker = starpu_combined_worker_assign_workerid(cpuWorkerCount, cpuWorkers);
+		starpu_sched_ctx_add_workers(&combinedWorker, 1, 0);
+
+		schedulers.reconstruct_fourier.add_workers(0, nullptr, 0);// Just force a refresh, not a very clean solution
+	}
 
 	starpu_malloc_set_align(ALIGNMENT);
 }
@@ -365,8 +378,8 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 
 		starpu_vector_data_register(&resultVolumeHandle, STARPU_MAIN_RAM, (uintptr_t) result.volumeData, dim3, sizeof(std::complex<float>));
 		starpu_vector_data_register(&resultWeightsHandle, STARPU_MAIN_RAM, (uintptr_t) result.weightsData, dim3, sizeof(float));
-		starpu_data_set_reduction_methods(resultVolumeHandle, &codelet.redux_sum_volume, &codelet.redux_init_volume);
-		starpu_data_set_reduction_methods(resultWeightsHandle, &codelet.redux_sum_weights, &codelet.redux_init_weights);
+		starpu_data_set_reduction_methods(resultVolumeHandle, &codelets.redux_sum_volume, &codelets.redux_init_volume);
+		starpu_data_set_reduction_methods(resultWeightsHandle, &codelets.redux_sum_weights, &codelets.redux_init_weights);
 		starpu_data_set_name(resultVolumeHandle, "Result Volume Data");
 		starpu_data_set_name(resultWeightsHandle, "Result Weights Data");
 	}
@@ -407,11 +420,11 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		starpu_data_set_name(amountLoadedHandle, "Batch Meta Data");
 
 		starpu_data_handle_t paddedImagesDataHandle = {0};
-		starpu_vector_data_register(&paddedImagesDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float)));
+		starpu_vector_data_register(&paddedImagesDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float), ALIGNMENT));
 		starpu_data_set_name(paddedImagesDataHandle, "Batch Padded Image Data");
 
 		starpu_data_handle_t traverseSpacesHandle = {0};
-		starpu_vector_data_register(&traverseSpacesHandle, -1, 0, currentBatchSize, sizeof(RecFourierProjectionTraverseSpace) * computeConstants.R_symmetries.size());
+		starpu_matrix_data_register(&traverseSpacesHandle, -1, 0, computeConstants.R_symmetries.size(), computeConstants.R_symmetries.size(), currentBatchSize, sizeof(RecFourierProjectionTraverseSpace));
 		starpu_data_set_name(traverseSpacesHandle, "Batch Traverse Spaces");
 
 		// Submit the task to load the projections
@@ -436,7 +449,7 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 
 			starpu_task *loadProjectionsTask = starpu_task_create();
 			loadProjectionsTask->name = "LoadProjections";
-			loadProjectionsTask->cl = &codelet.load_projections;
+			loadProjectionsTask->cl = &codelets.load_projections;
 			loadProjectionsTask->cl_arg = (void *) &loadProjectionArg;
 			loadProjectionsTask->cl_arg_size = sizeof(loadProjectionArg);
 			loadProjectionsTask->cl_arg_free = 0; // Do not free! (probably default)
@@ -456,7 +469,7 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		{
 			starpu_task* paddedImageToFftTask = starpu_task_create();
 			paddedImageToFftTask->name = "PaddedImageToFFT";
-			paddedImageToFftTask->cl = &codelet.padded_image_to_fft;
+			paddedImageToFftTask->cl = &codelets.padded_image_to_fft;
 			paddedImageToFftTask->handles[0] = paddedImagesDataHandle;
 			paddedImageToFftTask->handles[1] = fftHandle;
 			paddedImageToFftTask->handles[2] = fftScratchMemoryHandle;
@@ -473,7 +486,7 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		{// Submit the actual reconstruction
 			starpu_task* reconstructFftTask = starpu_task_create();
 			reconstructFftTask->name = "ReconstructFFT";
-			reconstructFftTask->cl = &codelet.reconstruct_fft;
+			reconstructFftTask->cl = &codelets.reconstruct_fft;
 			reconstructFftTask->handles[0] = fftHandle;
 			reconstructFftTask->handles[1] = traverseSpacesHandle;
 			reconstructFftTask->handles[2] = blobTableSquaredHandle;
@@ -502,6 +515,10 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 	starpu_data_unregister_submit(fftScratchMemoryHandle);
 
 	// Complete all processing
+	/*while (starpu_task_nsubmitted() > 0) {
+		starpu_do_schedule();
+		usleep(100000);//100ms
+	}*/
 	CHECK_STARPU(starpu_task_wait_for_all());
 
 	// Release result buffers synchronously, implicitly causes them to be copied to original memory location

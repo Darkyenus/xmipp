@@ -109,7 +109,7 @@ void func_redux_sum_weights_cuda(void* buffers[], void* cl_arg) {
 	sum_floats_on_cuda(targetCudaPtr, sourceCudaPtr, size);
 }
 
-inline void sum_floats_on_cpu(float* XMIPP_RESTRICT targetPtr, float* XMIPP_RESTRICT sourcePtr, size_t noOfFloats) {
+inline void sum_floats_on_cpu(float* __restrict targetPtr, float* __restrict sourcePtr, size_t noOfFloats) {
 	// Should get vectorized
 	targetPtr = (float*)XMIPP_ASSUME_ALIGNED(targetPtr, ALIGNMENT);
 	sourcePtr = (float*)XMIPP_ASSUME_ALIGNED(sourcePtr, ALIGNMENT);

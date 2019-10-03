@@ -34,18 +34,40 @@
 #include "reconstruct_fourier_codelets.h"
 #include "reconstruct_fourier_starpu_util.h"
 
+/**
+ * @param shiftMatrix 3x3 matrix for 2D affine transformations
+ * @param orientationMatrix 3x3 matrix for 3D rotation
+ */
+static void loadMatrices(MDRow& row, Matrix2D<double>& shiftMatrix, Matrix2D<double>& orientationMatrix) {
+	if (!row.containsLabel(MDL_TRANSFORM_MATRIX)) {
+		geo2TransformationMatrix(row, shiftMatrix, /*only_apply_shifts*/ true);
+	} else {
+		//TODO This ignores only_apply_shifts!
+		String matrixStr;
+		row.getValue(MDL_TRANSFORM_MATRIX, matrixStr);
+		Matrix2D<double> transformationMatrix(3, 3);
+		string2TransformationMatrix(matrixStr, transformationMatrix, 3);
+	}
+
+	// Compute the coordinate axes associated to this projection
+	double rot = 0, tilt = 0, psi = 0;
+	row.getValue(MDL_ANGLE_ROT, rot);
+	row.getValue(MDL_ANGLE_TILT, tilt);
+	row.getValue(MDL_ANGLE_PSI, psi);
+	Euler_angles2matrix(rot, tilt, psi, orientationMatrix);
+	orientationMatrix = orientationMatrix.transpose();
+}
+
 void func_load_projections(void* buffers[], void* cl_arg) {
 	const LoadProjectionArgs& arg = *static_cast<LoadProjectionArgs*>(cl_arg);
 
 	uint32_t& amountLoaded = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[0]))->noOfImages;
 	float* outImageData = (float*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float);
-	RecFourierProjectionTraverseSpace* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_VECTOR_GET_PTR(buffers[2]);
+	auto* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_MATRIX_GET_PTR(buffers[2]);
 
-	ApplyGeoParams geoParams;
-	geoParams.only_apply_shifts = true;
-
-	MultidimArray<float> paddedImageData; // Declared here so that internal allocated memory can be reused
+	MultidimArray<double> transformedImageData;
+	MultidimArray<float> paddedImageData(arg.paddedImageSize, arg.paddedImageSize); // Declared here so that internal allocated memory can be reused
 
 	uint32_t traverseSpaceIndex = 0;
 	uint32_t projectionIndex = 0;
@@ -53,28 +75,74 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 	for (uint32_t projectionInBatch = arg.batchStart; projectionInBatch < arg.batchEnd; projectionInBatch++) {
 		const size_t imageObjectIndex = arg.imageObjectIndices[projectionInBatch];
 
-		//Read projection from selfile, read also angles and shifts if present
-		//but only apply shifts (set above)
-		// FIXME following line is a current bottleneck, as it calls BSpline interpolation
+		// Read projection from selfile, read also angles and shifts if present but only apply shifts
 		Projection proj;
-		proj.readApplyGeo(arg.selFile, imageObjectIndex, geoParams);
-		if (arg.useWeights && proj.weight() == 0.f) {
+		MDRow row;
+		arg.selFile.getRow(row, imageObjectIndex);
+
+		double headerWeight = 1;
+		row.getValue(MDL_WEIGHT, headerWeight);
+		if (arg.useWeights && headerWeight == 0.f) {
 			continue;
 		}
+
+		{
+			FileName name;
+			row.getValue(MDL_IMAGE, name);
+			proj.read(name);
+		}
+
+		// NOTE(jp): Weight has to be read after the image data is read, it cannot be inferred just from the selFile,
+		// as the image file may contain weight on its own.
+		const float weight =  arg.useWeights ? static_cast<float>(proj.weight() * headerWeight) : 1.0f;
+		if (weight == 0.f) {
+			continue;
+		}
+
+		Matrix2D<double> shiftMatrix(3, 3);
+		Matrix2D<double> orientationMatrix(3, 3);
+		loadMatrices(row, shiftMatrix, orientationMatrix);
+
+		transformedImageData.resizeNoCopy(proj());
+		// FIXME following line is a current bottleneck, as it calls BSpline interpolation
+		applyGeometry(BSPLINE3, transformedImageData, proj.data, shiftMatrix, IS_NOT_INV, WRAP);
+
+		paddedImageData.initZeros(arg.paddedImageSize, arg.paddedImageSize);
+		paddedImageData.setXmippOrigin();
+		transformedImageData.setXmippOrigin();
+		FOR_ALL_ELEMENTS_IN_ARRAY2D(transformedImageData)
+				A2D_ELEM(paddedImageData,i,j) = static_cast<float>(A2D_ELEM(transformedImageData, i, j));
+
+#if 0
+		{// Debug dump
+			FILE* debug_file = fopen("debug_new.bin", "w");
+			uint32_t header[] = {
+					1234567890,
+					sizeof(float),
+					(uint32_t) paddedImageData.xdim,
+					(uint32_t) paddedImageData.ydim,
+					(uint32_t) paddedImageData.zdim,
+					1
+			};
+			fwrite(&header, sizeof(header[0]), sizeof(header)/sizeof(header[0]), debug_file);
+			fwrite(paddedImageData.data, paddedImageData.getSize(), sizeof(float), debug_file);
+			fclose(debug_file);
+		}
+#endif
+
+		// CenterFFT = center for fft (not fft itself)
+		CenterFFT(paddedImageData, true);
+
 		// NOTE(jp): No `continue` skipping after this point, indices to outputs are in lockstep
+		memcpy(outImageData + projectionIndex * outImageDataStride, paddedImageData.data, paddedImageData.getSize() * sizeof(float));
 
-		// Compute the coordinate axes associated to this projection
-		Matrix2D<double> Ainv(3, 3);
-		Euler_angles2matrix(proj.rot(), proj.tilt(), proj.psi(), Ainv);
-		Ainv = Ainv.transpose();
-
-		// prepare transforms for all  symmetries
+		// Prepare transforms for all symmetries
 		for (const Matrix2D<double>& symmetry : arg.rSymmetries) {
 			RecFourierProjectionTraverseSpace& space = outSpaces[traverseSpaceIndex++];
-			space.weight = arg.useWeights ? static_cast<float>(proj.weight()) : 1.0f;
+			space.weight = weight;
 			space.projectionIndex = projectionIndex; // "index to some array where the respective projection is stored"
 
-			Matrix2D<double> A_SL = symmetry * Ainv;
+			Matrix2D<double> A_SL = symmetry * orientationMatrix;
 			Matrix2D<double> A_SLInv = A_SL.inv();
 			float transf[3][3];
 			float transfInv[3][3];
@@ -84,22 +152,7 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 			computeTraverseSpace(arg.fftSizeX, arg.fftSizeY,
 			                     transf, transfInv, space,
 			                     arg.maxVolumeIndexX, arg.maxVolumeIndexYZ, arg.fastLateBlobbing, arg.blobRadius);
-
 		}
-
-		// Copy the projection to the center of the padded image
-		// and compute its Fourier transform, if requested
-		proj().setXmippOrigin();
-		const MultidimArray<double> &mProj = proj();
-		// NOTE(jp): Even though GPU will convert it to float, for simplicity we keep this in double for now
-		paddedImageData.initZeros(arg.paddedImageSize, arg.paddedImageSize);
-		paddedImageData.setXmippOrigin();
-		FOR_ALL_ELEMENTS_IN_ARRAY2D(mProj)
-			A2D_ELEM(paddedImageData,i,j) = static_cast<float>(A2D_ELEM(mProj, i, j));
-		// CenterFFT = center for fft (not fft itself)
-		CenterFFT(paddedImageData, true);
-
-		memcpy(outImageData + projectionIndex * outImageDataStride, paddedImageData.data, paddedImageData.getSize() * sizeof(float));
 
 		projectionIndex++;
 	}

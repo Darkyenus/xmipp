@@ -210,7 +210,8 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 		assert(false);
 	}
 
-	//TODO Cache plan
+	//TODO Investigate the use of cuFFTAdvisor to achieve better performance
+	//TODO Cache the plan explicitly
 	cufftHandle plan;
 	gpuErrchkFFT(cufftPlan2d(&plan, arg.paddedImageSize, arg.paddedImageSize, cufftType::CUFFT_R2C));
 	gpuErrchkFFT(cufftSetStream(plan, starpu_cuda_get_local_stream()));

@@ -153,21 +153,21 @@ extern void func_redux_init_weights_cpu(void* buffers[], void* cl_arg);
 struct Codelets {
 
 	/** Initial data loading. Loads data for a single batch. */
-	starpu_codelet load_projections;
+	starpu_codelet load_projections{0};
 	/** Crops and shifts loaded and fourier-transformed images. */
-	starpu_codelet padded_image_to_fft;
+	starpu_codelet padded_image_to_fft{0};
 	/** Reconstructs FFTs into volume field. */
-	starpu_codelet reconstruct_fft;
+	starpu_codelet reconstruct_fft{0};
 
 	/** Redux-init for reconstruct_fft volume and weights */
-	starpu_codelet redux_init_volume, redux_init_weights;
+	starpu_codelet redux_init_volume{0}, redux_init_weights{0};
 	/** Redux for reconstruct_fft volume and weights (sum) */
-	starpu_codelet redux_sum_volume, redux_sum_weights;
+	starpu_codelet redux_sum_volume{0}, redux_sum_weights{0};
 
 	/** Initializes the codelets. */
 	Codelets();
 };
 
-extern Codelets codelet;
+extern Codelets codelets;
 
 #endif //XMIPP_LIBRARIES_RECONSTRUCT_FOURIER_STARPU_CODELETS_H_

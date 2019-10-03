@@ -92,18 +92,18 @@ private:
 	 * @param myBatches will be filled with numbers of batches on which this worker should work on, may be nullptr
 	 * @return amount of batches distributed by default, equal to the next batch to distribute. If this value is equal to batchCount,
 	 * it means that all batches have been distributed by default and dynamic batch distribution is not needed. */
-	uint32_t defaultBatchDistribution(const uint32_t batchCount, const uint32_t workerCount, const uint32_t selfWorkerId, std::deque<uint32_t>* myBatches) const;
+	uint32_t defaultBatchDistribution(uint32_t batchCount, int workerCount, int selfWorkerId, std::deque<uint32_t>* myBatches) const;
 
 	/** Distributes the work to workers. Does not do any work itself.
 	 * @param workerCount amount of workers */
-	void runMaster(uint32_t workerCount);
+	void runMaster(int workerCount);
 
 	/** Takes orders from the master and processes given batches.
 	 * @param workComm shared communicator for all workers
 	 * @param workerCount amount of workers in workComm
 	 * @param workerRank of this worker. Rank 0 is primary and the one which gathers results,
 	 *                   post-processes them and saves the final output. */
-	void runWorker(MPI_Comm workComm, uint32_t workerCount, uint32_t workerRank);
+	void runWorker(MPI_Comm workComm, int workerCount, int workerRank);
 
 	struct DistributedBatchProvider;
 };

@@ -54,7 +54,7 @@ inline uint32_t alignmentOf(void * ptr) {
 }
 
 template<typename T>
-inline T align(T number, uint32_t alignment = ALIGNMENT) {
+inline T align(T number, uint32_t alignment) {
 	T off = number % alignment;
 	if (off == 0) {
 		return number;
@@ -65,10 +65,8 @@ inline T align(T number, uint32_t alignment = ALIGNMENT) {
 
 #ifdef __GNUC__
 #  define XMIPP_ASSUME_ALIGNED(ptr, bytes) (__builtin_assume_aligned(ptr, bytes))
-#  define XMIPP_RESTRICT __restrict
 #else
 #  define XMIPP_ASSUME_ALIGNED(ptr, bytes) (ptr)
-#  define XMIPP_RESTRICT
 #endif
 
 /** Wrap calls to error-returning StarPU functions with this to error on non-zero values. */

@@ -100,14 +100,14 @@ void ProgRecFourierMpiStarPU::run() {
 	// This code does that, but any modification must take this requirement into account.
 	CHECK_MPI(MPI_Comm_split(MPI_COMM_WORLD, rank == 0 ? MPI_UNDEFINED : 0, 0, &workComm));
 
-	uint32_t workerCount = static_cast<uint32_t>(size - 1);
+	const int workerCount = size - 1;
 
 	if (workComm == MPI_COMM_NULL) {
 		runMaster(workerCount);
 	} else {
 		int workerRank;
 		CHECK_MPI(MPI_Comm_rank(workComm, &workerRank));
-		runWorker(workComm, workerCount, static_cast<uint32_t>(workerRank));
+		runWorker(workComm, workerCount, workerRank);
 	}
 }
 
@@ -119,7 +119,7 @@ void ProgRecFourierMpiStarPU::run() {
  * @param myBatches will be filled with numbers of batches on which this worker should work on, may be nullptr
  * @return amount of batches distributed by default, equal to the next batch to distribute. If this value is equal to batchCount,
  * it means that all batches have been distributed by default and dynamic batch distribution is not needed. */
-uint32_t ProgRecFourierMpiStarPU::defaultBatchDistribution(const uint32_t batchCount, const uint32_t workerCount, const uint32_t selfWorkerId, std::deque<uint32_t>* myBatches) const {
+uint32_t ProgRecFourierMpiStarPU::defaultBatchDistribution(const uint32_t batchCount, const int workerCount, const int selfWorkerId, std::deque<uint32_t>* myBatches) const {
 	uint32_t distributedByDefault = static_cast<uint32_t>(percentOfJobsDistributedByDefault * batchCount);
 	// Always distribute at least preferredBatchesInPipeline batches to each worker
 	distributedByDefault = XMIPP_MAX(distributedByDefault, workerCount * preferredBatchesInPipeline);
@@ -142,7 +142,7 @@ uint32_t ProgRecFourierMpiStarPU::defaultBatchDistribution(const uint32_t batchC
 const int TAG_WORKER_TO_MASTER = 1;
 const int TAG_MASTER_TO_WORKER = 2;
 
-void ProgRecFourierMpiStarPU::runMaster(uint32_t workerCount) {
+void ProgRecFourierMpiStarPU::runMaster(int workerCount) {
 	if (verbose) {
 		show();
 	}
@@ -180,7 +180,7 @@ void ProgRecFourierMpiStarPU::runMaster(uint32_t workerCount) {
 		MPI_Request lastSendRequest = MPI_REQUEST_NULL;
 	};
 	std::vector<WorkerInfo> workerInfos(workerCount);
-	uint32_t workersComplete = 0;
+	int workersComplete = 0;
 	uint32_t batchesComplete = 0;
 
 	while (workersComplete < workerCount) {
@@ -281,8 +281,8 @@ private:
 	}
 
 public:
-	DistributedBatchProvider(const ProgRecFourierMpiStarPU& parent, uint32_t batchCount, uint32_t workerCount,
-	                         uint32_t workerRank) : parent(parent) {
+	DistributedBatchProvider(const ProgRecFourierMpiStarPU& parent, uint32_t batchCount, int workerCount, int workerRank)
+	: parent(parent) {
 		uint32_t nextBatch = parent.defaultBatchDistribution(batchCount, workerCount, workerRank, &defaultBatchQueue);
 		maxBatchCount = static_cast<uint32_t>(defaultBatchQueue.size() + batchCount - nextBatch);
 
@@ -356,7 +356,7 @@ public:
 	}
 };
 
-void ProgRecFourierMpiStarPU::runWorker(MPI_Comm workComm, uint32_t workerCount, uint32_t workerRank) {
+void ProgRecFourierMpiStarPU::runWorker(MPI_Comm workComm, int workerCount, int workerRank) {
 	prepareMetaData(fn_in, SF);
 	const uint32_t batchCount = computeBatchCount(params, SF);
 
@@ -365,8 +365,7 @@ void ProgRecFourierMpiStarPU::runWorker(MPI_Comm workComm, uint32_t workerCount,
 	initStarPU();
 
 	LOG_MPI("runWorker - starpu start");
-	ProgRecFourierMpiStarPU::DistributedBatchProvider batchSource(*this, batchCount, workerCount,
-	                                                              workerRank);
+	ProgRecFourierMpiStarPU::DistributedBatchProvider batchSource(*this, batchCount, workerCount, workerRank);
 	ComputeStarPUResult result = computeStarPU(params, SF, computeConstants, batchSource, (bool) verbose);
 	LOG_MPI("runWorker - starpu end");
 
@@ -379,21 +378,12 @@ void ProgRecFourierMpiStarPU::runWorker(MPI_Comm workComm, uint32_t workerCount,
 		                 (computeConstants.maxVolumeIndex + 1);
 		MPI_Request requests[2];
 		LOG_MPI("runWorker - reduce submit");
-		if (primary) {
-			CHECK_MPI(MPI_Ireduce(MPI_IN_PLACE, result.volumeData,
-			            reduceSize * 2, MPI_FLOAT,
-			            MPI_SUM, 0, workComm, &requests[0]));
-			CHECK_MPI(MPI_Ireduce(MPI_IN_PLACE, result.weightsData,
-			            reduceSize, MPI_FLOAT,
-			            MPI_SUM, 0, workComm, &requests[1]));
-		} else {
-			CHECK_MPI(MPI_Ireduce(result.volumeData, result.volumeData,
-			           reduceSize * 2, MPI_FLOAT,
-			           MPI_SUM, 0, workComm, &requests[0]));
-			CHECK_MPI(MPI_Ireduce(result.weightsData, result.weightsData,
-			           reduceSize, MPI_FLOAT,
-			           MPI_SUM, 0, workComm, &requests[1]));
-		}
+		CHECK_MPI(MPI_Ireduce(primary ? MPI_IN_PLACE : result.volumeData, result.volumeData,
+		                      reduceSize * 2, MPI_FLOAT,
+		                      MPI_SUM, 0, workComm, &requests[0]));
+		CHECK_MPI(MPI_Ireduce(primary ? MPI_IN_PLACE : result.weightsData, result.weightsData,
+		                      reduceSize, MPI_FLOAT,
+		                      MPI_SUM, 0, workComm, &requests[1]));
 
 		LOG_MPI("runWorker - reduce wait");
 		CHECK_MPI(MPI_Waitall(2, requests, MPI_STATUSES_IGNORE));
