@@ -66,7 +66,7 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float);
 	auto* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_MATRIX_GET_PTR(buffers[2]);
 
-	MultidimArray<double> transformedImageData;
+	MultidimArray<float> transformedImageData;
 	MultidimArray<float> paddedImageData(arg.paddedImageSize, arg.paddedImageSize); // Declared here so that internal allocated memory can be reused
 
 	uint32_t traverseSpaceIndex = 0;
