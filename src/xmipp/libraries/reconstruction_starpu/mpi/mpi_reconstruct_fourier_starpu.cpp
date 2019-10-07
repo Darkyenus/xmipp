@@ -397,15 +397,13 @@ void ProgRecFourierMpiStarPU::runWorker(MPI_Comm workComm, int workerCount, int 
 		return;
 	}
 
-	const uint32_t maxVolumeIndex = computeConstants.maxVolumeIndex;
-
 	// Convert flat volume and weight arrays into multidimensional arrays and destroy originals
-	std::complex<float>*** tempVolume = result.createXmippStyleVolume(maxVolumeIndex);
-	float*** tempWeights = result.createXmippStyleWeights(maxVolumeIndex);
+	std::complex<float>*** tempVolume = result.createXmippStyleVolume(computeConstants.maxVolumeIndex);
+	float*** tempWeights = result.createXmippStyleWeights(computeConstants.maxVolumeIndex);
 	result.destroy();
 
 	// Adjust and save the resulting volume
-	postProcessAndSave(params, computeConstants, fn_out, tempVolume, tempWeights, maxVolumeIndex);
+	postProcessAndSave(params, computeConstants, fn_out, tempVolume, tempWeights);
 }
 
 void ProgRecFourierMpiStarPU::read(int argc, char **argv, bool reportErrors) {
