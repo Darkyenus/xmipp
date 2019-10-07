@@ -148,7 +148,7 @@ void ProgRecFourierStarPU::prepareConstants(const Params& params, const MetaData
 	constants.imgSize = static_cast<int>(imageSize);
 	constants.paddedImgSize = static_cast<uint32_t>(imageSize * params.padding_factor_vol);
 	{
-		uint32_t conserveRows = (uint32_t) ceil(2.0 * constants.paddedImgSize * params.maxResolution);
+		uint32_t conserveRows = (uint32_t) ceil(2.0f * constants.paddedImgSize * params.maxResolution);
 		// Round up to nearest even number (i.e. divisible by 2)
 		constants.maxVolumeIndex = conserveRows + (conserveRows & 1); // second term is 1 iff conserveRows is odd, 0 otherwise
 	}
@@ -284,16 +284,14 @@ void ProgRecFourierStarPU::run() {
 	// We won't need StarPU anymore
 	shutdownStarPU();
 
-	const uint32_t maxVolumeIndex = computeConstants.maxVolumeIndex;
-
 	// TODO(jp): This step seems unnecessary (later steps would have to be rewritten to work with flat arrays) (also in MPI version)
 	// Convert flat volume and weight arrays into multidimensional arrays and destroy originals
-	std::complex<float>*** tempVolume = result.createXmippStyleVolume(maxVolumeIndex);
-	float*** tempWeights = result.createXmippStyleWeights(maxVolumeIndex);
+	std::complex<float>*** tempVolume = result.createXmippStyleVolume(computeConstants.maxVolumeIndex);
+	float*** tempWeights = result.createXmippStyleWeights(computeConstants.maxVolumeIndex);
 	result.destroy();
 
 	// Adjust and save the resulting volume
-	postProcessAndSave(params, computeConstants, fn_out, tempVolume, tempWeights, maxVolumeIndex);
+	postProcessAndSave(params, computeConstants, fn_out, tempVolume, tempWeights);
 }
 
 void ProgRecFourierStarPU::initStarPU() {
@@ -553,7 +551,9 @@ void ProgRecFourierStarPU::shutdownStarPU() {
 
 void ProgRecFourierStarPU::postProcessAndSave(
 		const Params& params, const ComputeConstants& computeConstants, const FileName& fn_out,
-		std::complex<float> ***tempVolume, float ***tempWeights, const uint32_t maxVolumeIndex) {
+		std::complex<float> ***tempVolume, float ***tempWeights) {
+
+	const uint32_t maxVolumeIndex = computeConstants.maxVolumeIndex;
 
 	// remove complex conjugate of the intermediate result
 	const uint32_t maxVolumeIndexX = maxVolumeIndex/2;// just half of the space is necessary, the rest is complex conjugate
@@ -571,34 +571,33 @@ void ProgRecFourierStarPU::postProcessAndSave(
 	forceHermitianSymmetry(tempVolume, tempWeights, maxVolumeIndexYZ);
 	processWeights(tempVolume, tempWeights, maxVolumeIndexX, maxVolumeIndexYZ, params.padding_factor_proj, params.padding_factor_vol, imgSize);
 	release(tempWeights, maxVolumeIndexYZ+1, maxVolumeIndexYZ+1);
-	MultidimArray< std::complex<double> > VoutFourier;
-	allocateVoutFourier(VoutFourier, paddedImgSize);
+	MultidimArray< std::complex<double> > VoutFourier(paddedImgSize, paddedImgSize, paddedImgSize/2 + 1); // allocate space for output Fourier transformation
+
 	convertToExpectedSpace(tempVolume, maxVolumeIndexYZ, VoutFourier);
 	release(tempVolume, maxVolumeIndexYZ+1, maxVolumeIndexYZ+1);
 
 	// Output volume
-	Image<double> Vout;
-	Vout().initZeros(paddedImgSize, paddedImgSize, paddedImgSize);
+	Image<double> Vout(paddedImgSize, paddedImgSize, paddedImgSize);
+	MultidimArray<double> &mVout = Vout.data;
 
-	FourierTransformer transformerVol;
-	transformerVol.setThreadsNumber(params.fourierTransformThreads);
-	transformerVol.fReal = &(Vout.data);
-	transformerVol.setFourierAlias(VoutFourier);
-	transformerVol.recomputePlanR2C();
-	transformerVol.inverseFourierTransform();
-	transformerVol.clear();
+	{
+		FourierTransformer transformerVol;
+		transformerVol.setThreadsNumber(params.fourierTransformThreads);
+		transformerVol.fReal = &mVout;
+		transformerVol.setFourierAlias(VoutFourier);
+		transformerVol.recomputePlanR2C();
+		transformerVol.inverseFourierTransform();
+	}
 
-	CenterFFT(Vout(), false);
+	CenterFFT(mVout, false);
 
 	// Correct by the Fourier transform of the blob
-	Vout().setXmippOrigin();
-	Vout().selfWindow(FIRST_XMIPP_INDEX(imgSize),FIRST_XMIPP_INDEX(imgSize),
+	mVout.setXmippOrigin();
+	mVout.selfWindow(FIRST_XMIPP_INDEX(imgSize),FIRST_XMIPP_INDEX(imgSize),
 	                  FIRST_XMIPP_INDEX(imgSize),LAST_XMIPP_INDEX(imgSize),
 	                  LAST_XMIPP_INDEX(imgSize),LAST_XMIPP_INDEX(imgSize));
 	double pad_relation = params.padding_factor_proj / params.padding_factor_vol;
 	pad_relation = (pad_relation * pad_relation * pad_relation);
-
-	MultidimArray<double> &mVout = Vout();
 
 	double ipad_relation = 1.0 / pad_relation;
 	double meanFactor2 = 0;
@@ -615,7 +614,6 @@ void ProgRecFourierStarPU::postProcessAndSave(
 		A3D_ELEM(mVout, k, i, j) *= meanFactor2;
 	}
 	Vout.write(fn_out);
-	Vout.clear();
 }
 
 void ProgRecFourierStarPU::BatchProvider::batchCompleted(void *batchProvider) {

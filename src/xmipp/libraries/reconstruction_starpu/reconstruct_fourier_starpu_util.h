@@ -191,15 +191,14 @@ static void convertToExpectedSpace(T*** input, int size, MultidimArray<U>& VoutF
 	int halfSize = size / 2;
 	for (int z = 0; z <= size; z++) {
 		for (int y = 0; y <= size; y++) {
+			// shift FFT from center to corners
+			const size_t newY = (y < halfSize) ? VoutFourier.ydim - halfSize + y : y - halfSize;
+			const size_t newZ = (z < halfSize) ? VoutFourier.zdim - halfSize + z : z - halfSize;
+
 			for (int x = 0; x <= halfSize; x++) {
-				size_t newPos[3];
-				// shift FFT from center to corners
-				newPos[0] = x; // no need to move
-				newPos[1] = (y < halfSize) ? VoutFourier.ydim - halfSize + y : y - halfSize ;
-				newPos[2] = (z < halfSize) ? VoutFourier.zdim - halfSize + z : z - halfSize ;
 				// store to output array
 				// += in necessary as VoutFourier might be used multiple times when used with MPI
-				DIRECT_A3D_ELEM(VoutFourier, newPos[2], newPos[1], newPos[0]) += input[z][y][x];
+				DIRECT_A3D_ELEM(VoutFourier, newZ, newY, x /* no need to move X */) += input[z][y][x];
 			}
 		}
 	}
@@ -316,20 +315,20 @@ static void mirrorAndCropTempSpaces(std::complex<float>***& tempVolume, float***
  * in respect to center of the space
  */
 static void forceHermitianSymmetry(std::complex<float>***& tempVolume, float***& tempWeights, int maxVolumeIndexYZ) {
-	int x = 0;
+	const int x = 0;
 	for (int z = 0; z <= maxVolumeIndexYZ; z++) {
 		for (int y = 0; y <= maxVolumeIndexYZ/2; y++) {
-			int newPos[3];
 			// mirror against center of the volume, e.g. [0,0,0]->[size,size,size]. It will fit as the input space is one voxel biger
-			newPos[0] = x;
-			newPos[1] = maxVolumeIndexYZ - y;
-			newPos[2] = maxVolumeIndexYZ - z;
-			std::complex<float> tmp1 = 0.5f * (tempVolume[newPos[2]][newPos[1]][newPos[0]] + conj(tempVolume[z][y][x]));
-			float tmp2 = 0.5f * (tempWeights[newPos[2]][newPos[1]][newPos[0]] + tempWeights[z][y][x]);
+			const int newX = x;
+			const int newY = maxVolumeIndexYZ - y;
+			const int newZ = maxVolumeIndexYZ - z;
 
-			tempVolume[newPos[2]][newPos[1]][newPos[0]] = tmp1;
-			tempVolume[z][y][x] = conj(tmp1);
-			tempWeights[newPos[2]][newPos[1]][newPos[0]] = tempWeights[z][y][x] = tmp2;
+			const std::complex<float> averageVol = 0.5f * (tempVolume[newZ][newY][newX] + conj(tempVolume[z][y][x]));
+			const float averageWeight = 0.5f * (tempWeights[newZ][newY][newX] + tempWeights[z][y][x]);
+
+			tempVolume[newZ][newY][newX] = averageVol;
+			tempVolume[z][y][x] = conj(averageVol);
+			tempWeights[newZ][newY][newX] = tempWeights[z][y][x] = averageWeight;
 		}
 	}
 }
@@ -415,16 +414,6 @@ static T*** applyBlob(T***& input, float blobSize,
 	// free original data
 	release(input, maxVolumeIndexYZ+1, maxVolumeIndexYZ+1);
 	return output;
-}
-
-/**
- * Method will allocate space for output Fourier transformation.
- * If space is already allocated, method will have no effect
- */
-static void allocateVoutFourier(MultidimArray<std::complex<double> >&VoutFourier, int paddedImgSize) {
-	if ((NULL == VoutFourier.data) || (0 == VoutFourier.getSize())) {
-		VoutFourier.initZeros(paddedImgSize, paddedImgSize, paddedImgSize/2 + 1);
-	}
 }
 
 #endif //XMIPP_LIBRARIES_RECONSTRUCT_FOURIER_STARPU_UTIL_H_

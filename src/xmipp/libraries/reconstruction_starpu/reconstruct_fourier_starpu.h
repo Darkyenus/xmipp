@@ -225,7 +225,7 @@ protected:
 	 * to final destination.
 	 */
 	static void postProcessAndSave(const Params& params, const ComputeConstants& computeConstants, const FileName& fn_out,
-			std::complex<float> ***tempVolume, float ***tempWeights, uint32_t maxVolumeIndex);
+			std::complex<float> ***tempVolume, float ***tempWeights);
 
 private:
 	struct SimpleBatchProvider;
