@@ -73,24 +73,24 @@ static void cropAndShift(
 
 	// convert image (shift to center and remove high frequencies)
 	int halfY = static_cast<int>(inputSizeY / 2);
-	for (uint32_t i = 0; i < inputSizeY; i++) {
-		for (uint32_t j = 0; j < outputSizeX; j++) {
-			if (i < outputSizeX || i >= (inputSizeY - outputSizeX)) {
+	for (uint32_t y = 0; y < inputSizeY; y++) {
+		for (uint32_t x = 0; x < outputSizeX; x++) {
+			if (y < outputSizeX || y >= (inputSizeY - outputSizeX)) {
 				// check the frequency
-				float2 freq = {fft_IDX2DIGFREQ(j, inputSizeY),
-				                fft_IDX2DIGFREQ(i, inputSizeY) };
+				float2 freq = { fft_IDX2DIGFREQ(x, inputSizeY),
+				                fft_IDX2DIGFREQ(y, inputSizeY) };
 
 				float2 item;
 				if (freq.x * freq.x + freq.y * freq.y > maxResolutionSqr) {
 					item = float2 { 0.0f, 0.0f };
 				} else {
-					item = input[i * inputSizeX + j];
+					item = input[y * inputSizeX + x];
 					item.x *= normalizationFactor;
 					item.y *= normalizationFactor;
 				}
 				// do the shift
-				int myPadI = static_cast<int>((i < halfY) ? i + outputSizeX : i - inputSizeY + outputSizeX);
-				int index = static_cast<int>(myPadI * outputSizeX + j);
+				int myPadI = static_cast<int>((y < halfY) ? y + outputSizeX : y - inputSizeY + outputSizeX);
+				int index = static_cast<int>(myPadI * outputSizeX + x);
 				output[index] = item;
 			}
 		}

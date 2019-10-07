@@ -131,6 +131,7 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 #endif
 
 		// CenterFFT = center for fft (not fft itself)
+		// NOTE(jp): I am not sure why is this done. It seems to flip some signs in the result of FFT according to some pattern.
 		CenterFFT(paddedImageData, true);
 
 		// NOTE(jp): No `continue` skipping after this point, indices to outputs are in lockstep

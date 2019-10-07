@@ -1024,9 +1024,12 @@ void processVoxelBlobCPU(
 		}
 	}
 
-	tempVolumeGPU[index3D].x += vol.x;
-	tempVolumeGPU[index3D].y += vol.y;
-	tempWeightsGPU[index3D] += w;
+	atomicAddFloat(&tempVolumeGPU[index3D].x, vol.x);
+	atomicAddFloat(&tempVolumeGPU[index3D].y, vol.y);
+	atomicAddFloat(&tempWeightsGPU[index3D], w);
+	//tempVolumeGPU[index3D].x += vol.x;
+	//tempVolumeGPU[index3D].y += vol.y;
+	//tempWeightsGPU[index3D] += w;
 }
 
 template<bool useFast, int blobOrder, bool useFastKaiser, bool usePrecomputedInterpolation>
