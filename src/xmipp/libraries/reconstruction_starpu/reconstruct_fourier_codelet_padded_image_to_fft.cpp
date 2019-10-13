@@ -132,9 +132,7 @@ void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
 	const uint32_t rawFftSizeY = STARPU_MATRIX_GET_NY(buffers[2]);
 
 	const size_t imageStridePaddedImage = STARPU_VECTOR_GET_ELEMSIZE(buffers[0]) / sizeof(float);
-	const size_t temporaryFftScratchWidth = STARPU_MATRIX_GET_NX(buffers[2]);
-	const size_t temporaryFftScratchHeight = STARPU_MATRIX_GET_NY(buffers[2]);
-	const size_t temporaryFftScratchSizeBytes = STARPU_MATRIX_GET_ELEMSIZE(buffers[2]) * temporaryFftScratchWidth * temporaryFftScratchHeight;
+	const size_t temporaryFftScratchSizeBytes = STARPU_MATRIX_GET_ELEMSIZE(buffers[2]) * rawFftSizeX * rawFftSizeY;
 	const size_t imageStrideOutput = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float2);
 
 	if (alignmentOf(inPaddedImage) < ALIGNMENT || alignmentOf(temporaryFftScratch) < ALIGNMENT) {
@@ -160,7 +158,7 @@ void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
 
 		fftwf_execute_dft_r2c(plan, in, (fftwf_complex*) temporaryFftScratch);
 
-		frequencyDomainShiftCpu(temporaryFftScratch, arg.paddedImageSize, arg.paddedImageSize, temporaryFftScratchWidth, transformArgs[i].shiftX, transformArgs[i].shiftY);
+		frequencyDomainShiftCpu(temporaryFftScratch, arg.paddedImageSize, arg.paddedImageSize, rawFftSizeX, transformArgs[i].shiftX, transformArgs[i].shiftY);
 
 		cropAndShift(temporaryFftScratch, rawFftSizeX, rawFftSizeY, arg.fftSizeX,
 		             out, arg.maxResolutionSqr, normalizationFactor);
@@ -219,6 +217,27 @@ void convertImagesKernel(
 	}
 }
 
+__device__
+static void frequencyDomainShiftGpu(float2* image, uint32_t memorySizeX, uint32_t memorySizeY, float factorX, float factorY) {
+	// CUDA version of frequencyDomainShiftCpu
+	uint32_t x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	uint32_t y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+	if (x >= memorySizeX || y >= memorySizeY) {
+		return;
+	}
+
+	float2* imagePixel = image + y * memorySizeX + x;
+
+	const float oldReal = imagePixel->x;
+	const float angle = TWOPI * (factorX * x + factorY * y);
+	const float newReal = oldReal * cosf(angle);
+	const float newImaginary = oldReal * -sinf(angle);
+
+	imagePixel->x = newReal;
+	imagePixel->y = newImaginary;
+}
+
 void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
@@ -231,7 +250,7 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 	const uint32_t rawFftSizeY = STARPU_MATRIX_GET_NY(buffers[2]);
 
 	const size_t imageStridePaddedImage = STARPU_VECTOR_GET_ELEMSIZE(buffers[0]) / sizeof(float);
-	const size_t temporaryFftScratchSizeBytes = STARPU_VECTOR_GET_ELEMSIZE(buffers[2]) * STARPU_VECTOR_GET_NX(buffers[2]);
+	const size_t temporaryFftScratchSizeBytes = STARPU_MATRIX_GET_ELEMSIZE(buffers[2]) * rawFftSizeX * rawFftSizeY;
 	const size_t imageStrideOutput = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float2);
 
 	if (alignmentOf(inPaddedImage) < ALIGNMENT || alignmentOf(temporaryFftScratch) < ALIGNMENT) {
@@ -260,9 +279,17 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 		// Execute FFT plan
 		gpuErrchkFFT(cufftExecR2C(plan, in, temporaryFftScratch));
 
-		// Process results, one thread for each pixel of raw FFT
+		// One thread for each pixel of raw FFT
 		dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
 		dim3 dimGrid((rawFftSizeX + dimBlock.x - 1) / dimBlock.x, (rawFftSizeY + dimBlock.y - 1) / dimBlock.y);
+
+		// Translate FFT
+		frequencyDomainShiftGpu<<<fimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
+				temporaryFftScratch, rawFftSizeX, rawFftSizeY,
+				transformArgs[i].shiftX / arg.paddedImageSize, transformArgs[i].shiftY / arg.paddedImageSize);
+		gpuErrchk(cudaPeekAtLastError());
+
+		// Process results
 		convertImagesKernel<<<dimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
 				temporaryFftScratch, rawFftSizeX, rawFftSizeY, arg.fftSizeX,
 				out, arg.maxResolutionSqr, normalizationFactor);
