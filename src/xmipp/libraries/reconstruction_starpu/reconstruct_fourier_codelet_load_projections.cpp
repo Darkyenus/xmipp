@@ -45,8 +45,7 @@ static void loadMatrices(MDRow& row, Matrix2D<double>& shiftMatrix, Matrix2D<dou
 		//TODO This ignores only_apply_shifts!
 		String matrixStr;
 		row.getValue(MDL_TRANSFORM_MATRIX, matrixStr);
-		Matrix2D<double> transformationMatrix(3, 3);
-		string2TransformationMatrix(matrixStr, transformationMatrix, 3);
+		string2TransformationMatrix(matrixStr, shiftMatrix, 3);
 	}
 
 	// Compute the coordinate axes associated to this projection
@@ -132,7 +131,7 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 
 		// CenterFFT = center for fft (not fft itself)
 		// NOTE(jp): I am not sure why is this done. It seems to flip some signs in the result of FFT according to some pattern.
-		//CenterFFT(paddedImageData, true);
+		CenterFFT(paddedImageData, true);
 
 		// NOTE(jp): No `continue` skipping after this point, indices to outputs are in lockstep
 		memcpy(outImageData + projectionIndex * outImageDataStride, paddedImageData.data, paddedImageData.getSize() * sizeof(float));

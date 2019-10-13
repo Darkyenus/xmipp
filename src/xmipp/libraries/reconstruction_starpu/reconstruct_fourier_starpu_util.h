@@ -344,13 +344,11 @@ static void processWeights(std::complex<float>***& tempVolume, float***& tempWei
 	for (int z = 0; z <= maxVolumeIndexYZ; z++) {
 		for (int y = 0; y <= maxVolumeIndexYZ; y++) {
 			for (int x = 0; x <= maxVolumeIndexX; x++) {
-				float weight = tempWeights[z][y][x];
-				if (fabs(weight) > 1e-3) {
-					weight = 1.f/weight;
-				}
+				const float weight = tempWeights[z][y][x];
 
-				if (1.0/weight > ACCURACY)
-					tempVolume[z][y][x] *= corr2D_3D * weight;
+				// TODO(jp): Fix other places that do this operation: https://github.com/I2PC/xmipp/pull/185#discussion_r331810014
+				if (weight > ACCURACY)
+					tempVolume[z][y][x] *= corr2D_3D / weight;
 				else
 					tempVolume[z][y][x] = 0;
 			}
