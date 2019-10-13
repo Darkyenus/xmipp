@@ -38,11 +38,11 @@
  * @param shiftMatrix 3x3 matrix for 2D affine transformations
  * @param orientationMatrix 3x3 matrix for 3D rotation
  */
-static void loadMatrices(MDRow& row, double& shiftX, double &shiftY, bool &flip, double &scale, Matrix2D<double>& orientationMatrix) {
+static void loadMatrices(MDRow& row, double& shiftX, double &shiftY, bool &flip, Matrix2D<double>& orientationMatrix) {
 	if (row.containsLabel(MDL_TRANSFORM_MATRIX)) {
 		static bool warned = false;
 		if (!warned) {
-			std::cerr << "WARNING: input image contains MDL_TRANSFORM_MATRIX, which is not supported and will be ignored\n";
+			std::cerr << "\nWARNING: input image contains MDL_TRANSFORM_MATRIX, which is not supported and will be ignored\n\n";
 			warned = true;
 		}
 
@@ -53,14 +53,21 @@ static void loadMatrices(MDRow& row, double& shiftX, double &shiftY, bool &flip,
 		// TODO Support this if needed
 	}
 
-	scale = 1;
 	shiftX = shiftY = 0;
 	flip = false;
 
 	row.getValue(MDL_SHIFT_X, shiftX);
 	row.getValue(MDL_SHIFT_Y, shiftY);
-	row.getValue(MDL_SCALE, scale);
 	row.getValue(MDL_FLIP, flip);
+
+	double scale = 1;
+	if (row.getValue(MDL_SCALE, scale) && scale != 1) {
+		static bool warned = false;
+		if (!warned) {
+			std::cerr << "\nWARNING: input image contains MDL_SCALE, which is not supported and will be ignored\n\n";
+			warned = true;
+		}
+	}
 
 	// Compute the coordinate axes associated to this projection
 	double rot = 0, tilt = 0, psi = 0;
@@ -116,12 +123,11 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 		Matrix2D<double> orientationMatrix(3, 3);
 		bool flip = false;
 		{
-			double shiftX = 0, shiftY = 0, scale = 1;
-			loadMatrices(row, shiftX, shiftY, flip, scale, orientationMatrix);
+			double shiftX = 0, shiftY = 0;
+			loadMatrices(row, shiftX, shiftY, flip, orientationMatrix);
 			FrequencyDomainTransformArgs &transformArg = transformArgs[projectionIndex];
 			transformArg.shiftX = (float)shiftX;
 			transformArg.shiftY = (float)shiftY;
-			transformArg.scale = (float)scale;
 		}
 
 		// FIXME following line is a current bottleneck, as it calls BSpline interpolation

@@ -112,9 +112,6 @@ struct PaddedImageToFftArgs {
 struct FrequencyDomainTransformArgs {
 	/** Sub-pixel shifts (translation) to apply to the image after transformation to the frequency domain. */
 	float shiftX, shiftY;
-
-	/** Scale factor to apply to the image. */
-	float scale;
 };
 
 struct ReconstructFftArgs {
