@@ -284,7 +284,7 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 		dim3 dimGrid((rawFftSizeX + dimBlock.x - 1) / dimBlock.x, (rawFftSizeY + dimBlock.y - 1) / dimBlock.y);
 
 		// Translate FFT
-		frequencyDomainShiftGpu<<<fimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
+		frequencyDomainShiftGpu<<<dimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
 				temporaryFftScratch, rawFftSizeX, rawFftSizeY,
 				transformArgs[i].shiftX / arg.paddedImageSize, transformArgs[i].shiftY / arg.paddedImageSize);
 		gpuErrchk(cudaPeekAtLastError());
