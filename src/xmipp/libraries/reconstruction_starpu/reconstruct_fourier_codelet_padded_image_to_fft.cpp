@@ -217,7 +217,7 @@ void convertImagesKernel(
 	}
 }
 
-__device__
+__global__
 static void frequencyDomainShiftGpu(float2* image, uint32_t memorySizeX, uint32_t memorySizeY, float factorX, float factorY) {
 	// CUDA version of frequencyDomainShiftCpu
 	uint32_t x = (blockIdx.x * blockDim.x) + threadIdx.x;
