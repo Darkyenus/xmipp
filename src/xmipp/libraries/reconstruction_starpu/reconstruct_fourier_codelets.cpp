@@ -77,10 +77,11 @@ Codelets::Codelets() {
 	load_projections.where = STARPU_CPU;
 	load_projections.cpu_funcs[0] = func_load_projections;
 	load_projections.cpu_funcs_name[0] = "combine_image_func";
-	load_projections.nbuffers = 3;
+	load_projections.nbuffers = 4;
 	load_projections.modes[0] = STARPU_W; // LoadedImagesBuffer
 	load_projections.modes[1] = STARPU_W; // Image Data Buffer
 	load_projections.modes[2] = STARPU_W; // Spaces Buffer
+	load_projections.modes[3] = STARPU_W; // Frequency Domain Transform Args Buffer
 	load_projections.name = "codelet_load_projections";
 	static struct starpu_perfmodel load_projections_model = create_common_perfmodel("load_projections_model");
 	load_projections_model.size_base = load_projections_size_base;
@@ -89,21 +90,23 @@ Codelets::Codelets() {
 
 
 	// Padded Image to FFT Codelet
-	padded_image_to_fft.where = STARPU_CPU | STARPU_CUDA;
+	padded_image_to_fft.where = STARPU_CPU /*| STARPU_CUDA*/;
 	padded_image_to_fft.cpu_funcs[0] = func_padded_image_to_fft_cpu;
 	padded_image_to_fft.cpu_funcs_name[0] = "func_padded_image_to_fft_cpu";
 	padded_image_to_fft.cuda_funcs[0] = func_padded_image_to_fft_cuda;
 	padded_image_to_fft.cuda_flags[0] = STARPU_CUDA_ASYNC;
-	padded_image_to_fft.nbuffers = 4;
+	padded_image_to_fft.nbuffers = 5;
 	padded_image_to_fft.modes[0] = STARPU_R; // Padded Image Data Buffer
 	padded_image_to_fft.modes[1] = STARPU_W; // FFT Buffer
 	padded_image_to_fft.modes[2] = STARPU_SCRATCH; // Raw FFT Scratch Area
 	padded_image_to_fft.modes[3] = STARPU_R; // LoadedImagesBuffer
+	padded_image_to_fft.modes[4] = STARPU_R; // Frequency Domain Transform Args Buffer
 	padded_image_to_fft.specific_nodes = 1;
 	padded_image_to_fft.nodes[0] = STARPU_SPECIFIC_NODE_LOCAL;
 	padded_image_to_fft.nodes[1] = STARPU_SPECIFIC_NODE_LOCAL;
 	padded_image_to_fft.nodes[2] = STARPU_SPECIFIC_NODE_LOCAL;
 	padded_image_to_fft.nodes[3] = STARPU_SPECIFIC_NODE_CPU;
+	padded_image_to_fft.nodes[4] = STARPU_SPECIFIC_NODE_CPU;
 	padded_image_to_fft.name = "codelet_padded_image_to_fft";
 	static struct starpu_perfmodel padded_image_to_fft_model = create_common_perfmodel("padded_image_to_fft_model");
 	padded_image_to_fft_model.size_base = padded_image_to_fft_size_base;

@@ -109,6 +109,14 @@ struct PaddedImageToFftArgs {
 	uint32_t fftSizeX, fftSizeY;
 };
 
+struct FrequencyDomainTransformArgs {
+	/** Sub-pixel shifts (translation) to apply to the image after transformation to the frequency domain. */
+	float shiftX, shiftY;
+
+	/** Scale factor to apply to the image. */
+	float scale;
+};
+
 struct ReconstructFftArgs {
 	float blobRadius;
 	uint32_t maxVolIndexYZ;

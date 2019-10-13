@@ -38,21 +38,36 @@
  * @param shiftMatrix 3x3 matrix for 2D affine transformations
  * @param orientationMatrix 3x3 matrix for 3D rotation
  */
-static void loadMatrices(MDRow& row, Matrix2D<double>& shiftMatrix, Matrix2D<double>& orientationMatrix) {
-	if (!row.containsLabel(MDL_TRANSFORM_MATRIX)) {
-		geo2TransformationMatrix(row, shiftMatrix, /*only_apply_shifts*/ true);
-	} else {
-		//TODO This ignores only_apply_shifts!
-		String matrixStr;
-		row.getValue(MDL_TRANSFORM_MATRIX, matrixStr);
-		string2TransformationMatrix(matrixStr, shiftMatrix, 3);
+static void loadMatrices(MDRow& row, double& shiftX, double &shiftY, bool &flip, double &scale, Matrix2D<double>& orientationMatrix) {
+	if (row.containsLabel(MDL_TRANSFORM_MATRIX)) {
+		static bool warned = false;
+		if (!warned) {
+			std::cerr << "WARNING: input image contains MDL_TRANSFORM_MATRIX, which is not supported and will be ignored\n";
+			warned = true;
+		}
+
+		//String matrixStr;
+		//row.getValue(MDL_TRANSFORM_MATRIX, matrixStr);
+		//Matrix2D<double> transformMatrix;
+		//string2TransformationMatrix(matrixStr, transformMatrix, 3);
+		// TODO Support this if needed
 	}
+
+	scale = 1;
+	shiftX = shiftY = 0;
+	flip = false;
+
+	row.getValue(MDL_SHIFT_X, shiftX);
+	row.getValue(MDL_SHIFT_Y, shiftY);
+	row.getValue(MDL_SCALE, scale);
+	row.getValue(MDL_FLIP, flip);
 
 	// Compute the coordinate axes associated to this projection
 	double rot = 0, tilt = 0, psi = 0;
 	row.getValue(MDL_ANGLE_ROT, rot);
 	row.getValue(MDL_ANGLE_TILT, tilt);
 	row.getValue(MDL_ANGLE_PSI, psi);
+
 	Euler_angles2matrix(rot, tilt, psi, orientationMatrix);
 	orientationMatrix = orientationMatrix.transpose();
 }
@@ -64,8 +79,8 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 	float* outImageData = (float*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float);
 	auto* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_MATRIX_GET_PTR(buffers[2]);
+	auto* transformArgs = (FrequencyDomainTransformArgs*)STARPU_VECTOR_GET_PTR(buffers[3]);
 
-	MultidimArray<float> transformedImageData;
 	MultidimArray<float> paddedImageData(arg.paddedImageSize, arg.paddedImageSize); // Declared here so that internal allocated memory can be reused
 
 	uint32_t traverseSpaceIndex = 0;
@@ -98,19 +113,32 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 			continue;
 		}
 
-		Matrix2D<double> shiftMatrix(3, 3);
 		Matrix2D<double> orientationMatrix(3, 3);
-		loadMatrices(row, shiftMatrix, orientationMatrix);
+		bool flip = false;
+		{
+			double shiftX = 0, shiftY = 0, scale = 1;
+			loadMatrices(row, shiftX, shiftY, flip, scale, orientationMatrix);
+			FrequencyDomainTransformArgs &transformArg = transformArgs[projectionIndex];
+			transformArg.shiftX = (float)shiftX;
+			transformArg.shiftY = (float)shiftY;
+			transformArg.scale = (float)scale;
+		}
 
-		transformedImageData.resizeNoCopy(proj());
 		// FIXME following line is a current bottleneck, as it calls BSpline interpolation
-		applyGeometry(BSPLINE3, transformedImageData, proj.data, shiftMatrix, IS_NOT_INV, WRAP);
+		//applyGeometry(BSPLINE3, transformedImageData, proj.data, shiftMatrix, IS_NOT_INV, WRAP);
 
 		paddedImageData.initZeros(arg.paddedImageSize, arg.paddedImageSize);
 		paddedImageData.setXmippOrigin();
-		transformedImageData.setXmippOrigin();
-		FOR_ALL_ELEMENTS_IN_ARRAY2D(transformedImageData)
-				A2D_ELEM(paddedImageData,i,j) = static_cast<float>(A2D_ELEM(transformedImageData, i, j));
+
+		MultidimArray<double>& rawImageData = proj.data;
+		rawImageData.setXmippOrigin();
+		if (!flip) {
+			FOR_ALL_ELEMENTS_IN_ARRAY2D(rawImageData)
+					A2D_ELEM(paddedImageData, i, j) = static_cast<float>(A2D_ELEM(rawImageData, i, j));
+		} else {
+			FOR_ALL_ELEMENTS_IN_ARRAY2D(rawImageData)
+					A2D_ELEM(paddedImageData, -i, -j) = static_cast<float>(A2D_ELEM(rawImageData, i, j));
+		}
 
 #if 0
 		{// Debug dump

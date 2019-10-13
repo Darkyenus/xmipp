@@ -421,6 +421,10 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		starpu_vector_data_register(&paddedImagesDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float), ALIGNMENT));
 		starpu_data_set_name(paddedImagesDataHandle, "Batch Padded Image Data");
 
+		starpu_data_handle_t frequencyDomainTransformArgsHandle = {0};
+		starpu_vector_data_register(&frequencyDomainTransformArgsHandle, -1, 0, currentBatchSize, sizeof(FrequencyDomainTransformArgs));
+		starpu_data_set_name(frequencyDomainTransformArgsHandle, "Frequency Domain Transform Args");
+
 		starpu_data_handle_t traverseSpacesHandle = {0};
 		starpu_matrix_data_register(&traverseSpacesHandle, -1, 0, computeConstants.R_symmetries.size(), computeConstants.R_symmetries.size(), currentBatchSize, sizeof(RecFourierProjectionTraverseSpace));
 		starpu_data_set_name(traverseSpacesHandle, "Batch Traverse Spaces");
@@ -454,6 +458,7 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 			loadProjectionsTask->handles[0] = amountLoadedHandle;
 			loadProjectionsTask->handles[1] = paddedImagesDataHandle;
 			loadProjectionsTask->handles[2] = traverseSpacesHandle;
+			loadProjectionsTask->handles[3] = frequencyDomainTransformArgsHandle;
 			loadProjectionsTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
 
 			CHECK_STARPU(starpu_task_submit(loadProjectionsTask));
@@ -472,6 +477,7 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 			paddedImageToFftTask->handles[1] = fftHandle;
 			paddedImageToFftTask->handles[2] = fftScratchMemoryHandle;
 			paddedImageToFftTask->handles[3] = amountLoadedHandle;
+			paddedImageToFftTask->handles[4] = frequencyDomainTransformArgsHandle;
 			paddedImageToFftTask->cl_arg = &imageToFftArg;
 			paddedImageToFftTask->cl_arg_size = sizeof(PaddedImageToFftArgs);
 			paddedImageToFftTask->cl_arg_free = 0;
@@ -480,6 +486,7 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		}
 
 		starpu_data_unregister_submit(paddedImagesDataHandle);
+		starpu_data_unregister_submit(frequencyDomainTransformArgsHandle);
 
 		{// Submit the actual reconstruction
 			starpu_task* reconstructFftTask = starpu_task_create();
