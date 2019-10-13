@@ -90,7 +90,7 @@ Codelets::Codelets() {
 
 
 	// Padded Image to FFT Codelet
-	padded_image_to_fft.where = STARPU_CPU /*| STARPU_CUDA*/;
+	padded_image_to_fft.where = STARPU_CPU | STARPU_CUDA;
 	padded_image_to_fft.cpu_funcs[0] = func_padded_image_to_fft_cpu;
 	padded_image_to_fft.cpu_funcs_name[0] = "func_padded_image_to_fft_cpu";
 	padded_image_to_fft.cuda_funcs[0] = func_padded_image_to_fft_cuda;
