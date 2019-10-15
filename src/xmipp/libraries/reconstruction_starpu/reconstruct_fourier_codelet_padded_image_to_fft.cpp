@@ -130,17 +130,32 @@ static void testFrequencyDomainShift() {
 	}
 	tested = true;
 
-	float2 image[] = {
+
+	/*
+	 int size = 4;
+	 float2 image[] = {
 			{1, + 0},  {0, - 1},{-1, + 0},  {0, + 1},
 			{0, - 1} , {-1, + 0}  , {0, + 1}  ,  {1, + 0},
 			{-1, + 0},   {0, + 1} ,  {1, + 0} ,   {0, - 1},
 			{0, + 1} ,  {1, - 0}  , {0, - 1}  , {-1, - 0}
-	};
-	frequencyDomainShiftCpu(image, 4, 4, 4, 1, 0);
+	};*/
+	/*
+1 0i   0 0i    1 0   0 0i
+0 0i     0 1i   0 0i   0 1i
+-1 0i   0 0i   -1 0i   0 0i
+0 0i   0 -1i   0 0i   0 -1i
+	 */
 
-	for (int y = 0; y < 4; ++y) {
-		for (int x = 0; x < 4; ++x) {
-			float2 p = image[y * 4 + x];
+	int size = 2;
+	float2 image[] = {
+			{1, 0}, {-1, 0},
+			{1, 0}, {-1, 0}
+	};
+	frequencyDomainShiftCpu(image, size, size, size, 1, 0);
+
+	for (int y = 0; y < size; ++y) {
+		for (int x = 0; x < size; ++x) {
+			float2 p = image[y * size + x];
 			std::cout << p.x << " " << p.y << "i   ";
 		}
 		std::cout << "\n";
