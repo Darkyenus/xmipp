@@ -141,7 +141,7 @@ static void testFrequencyDomainShift() {
 	for (int y = 0; y < 4; ++y) {
 		for (int x = 0; x < 4; ++x) {
 			float2 p = image[y * 4 + x];
-			std::out << p.x << " " << p.y << "i   ";
+			std::cout << p.x << " " << p.y << "i   ";
 		}
 		std::cout << "\n";
 	}
