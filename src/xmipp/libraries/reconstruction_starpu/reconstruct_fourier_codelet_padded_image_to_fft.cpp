@@ -100,6 +100,9 @@ static void cropAndShift(
 
 static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t sizeY, uint32_t memorySizeX, float shiftX, float shiftY) {
 	// https://www.arc.id.au/ZoomFFT.html
+	// https://www.clear.rice.edu/elec301/Projects01/image_filt/properties.html#shiftp
+	// https://stackoverflow.com/questions/25827916/matlab-shifting-an-image-using-fft
+	// http://www.thefouriertransform.com/transform/properties.php
 	const float factorX = shiftX / sizeX;
 	const float factorY = shiftY / sizeY;
 	for (uint32_t y = 0; y < sizeY; ++y) {
@@ -120,7 +123,32 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 	}
 }
 
+static void testFrequencyDomainShift() {
+	static bool tested = false;
+	if (tested) {
+		return;
+	}
+	tested = true;
+
+	float2 image[] = {
+			{1, + 0},  {0, - 1},{-1, + 0},  {0, + 1},
+			{0, - 1} , {-1, + 0}  , {0, + 1}  ,  {1, + 0},
+			{-1, + 0},   {0, + 1} ,  {1, + 0} ,   {0, - 1},
+			{0, + 1} ,  {1, - 0}  , {0, - 1}  , {-1, - 0}
+	};
+	frequencyDomainShiftCpu(image, 4, 4, 4, 1, 0);
+
+	for (int y = 0; y < 4; ++y) {
+		for (int x = 0; x < 4; ++x) {
+			float2 p = image[y * 4 + x];
+			std::out << p.x << " " << p.y << "i   ";
+		}
+		std::cout << "\n";
+	}
+}
+
 void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
+	testFrequencyDomainShift();
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	float2* temporaryFftScratch = (float2*)STARPU_MATRIX_GET_PTR(buffers[2]);
@@ -239,6 +267,7 @@ static void frequencyDomainShiftGpu(float2* image, uint32_t memorySizeX, uint32_
 }
 
 void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
+	testFrequencyDomainShift();
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	float2* temporaryFftScratch = (float2*)STARPU_MATRIX_GET_PTR(buffers[2]);
