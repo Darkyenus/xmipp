@@ -66,8 +66,8 @@ inline float fft_IDX2DIGFREQ(int idx, int size) {
  * For example for indices 0 to 12 and size 13 returns:
  * 0   1   2   3   4   5   6  -6  -5  -4  -3  -2  -1
  */
-inline unsigned fftIndexShift(unsigned i, unsigned size) {
-	unsigned halfSize = size / 2;
+inline int fftIndexShift(int i, int size) {
+	int halfSize = size / 2;
 	if (i <= halfSize) {
 		return i;
 	} else {
