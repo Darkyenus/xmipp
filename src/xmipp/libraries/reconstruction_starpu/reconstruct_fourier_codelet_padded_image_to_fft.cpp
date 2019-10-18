@@ -119,10 +119,15 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 	// http://www.thefouriertransform.com/transform/properties.php
 	const float factorX = shiftX / sizeX;
 	const float factorY = shiftY / sizeY;
+	std::cout << "\n";
 	for (uint32_t y = 0; y < sizeY; ++y) {
 		float2* imageRow = image + y * memorySizeX;
 		for (uint32_t x = 0; x < memorySizeX; ++x) {
 			float2* imagePixel = imageRow + x;
+
+			// factor.real = 0
+			float factorI = -TWOPI * ((shiftX * fftIndexShift(x, sizeX) / sizeX) + (shiftY * fftIndexShift(y, sizeY) / sizeY));
+			std::cout << std::fixed << std::setprecision(3) << factorI << "   ";
 
 			const float oldReal = imagePixel->x;
 			//float newReal = oldReal * cosf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
@@ -134,6 +139,7 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 			imagePixel->x = newReal;
 			imagePixel->y = newImaginary;
 		}
+		std::cout << "\n";
 	}
 }
 
@@ -150,6 +156,12 @@ static void testFrequencyDomainShift() {
 		{-0.88368, - 0.58689}, { -0.01675, + 1.09332},{  0.95534, - 0.41150},
 		{-0.88368, + 0.58689}, {  0.95534, + 0.41150},{ -0.01675, - 1.09332}
 	};
+
+	/*
+		 1.033 -0.000i   0.285 0.494i   -0.266 0.505i
+		-0.884 0.000i   0.008 0.015i   0.446 -0.845i
+		-0.884 0.000i   -0.478 -0.827i   -0.008 0.015i
+	 */
 
 	frequencyDomainShiftCpu(image, size, size, size, 1, 0);
 
