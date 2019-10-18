@@ -125,23 +125,27 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 		for (uint32_t x = 0; x < memorySizeX; ++x) {
 			float2* imagePixel = imageRow + x;
 
-			const float angle = -TWOPI * ((shiftX * fftIndexShift(x, sizeX) / sizeX) + (shiftY * fftIndexShift(y, sizeY) / sizeY));
-			const float factorReal = cosf(angle);
-			const float factorImag = sinf(angle);
+			{
+				const float angle = -TWOPI * ((shiftX * fftIndexShift(x, sizeX) / sizeX) +
+				                              (shiftY * fftIndexShift(y, sizeY) / sizeY));
+				const float factorReal = cosf(angle);
+				const float factorImag = sinf(angle);
 
-			std::cout << std::fixed << std::setprecision(3) << factorReal << " " << factorImag << "i   ";
+				std::cout << std::fixed << std::setprecision(3) << factorReal << " " << factorImag << "i   ";
+			}
 
 
+			{
+				const float oldReal = imagePixel->x;
+				//float newReal = oldReal * cosf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
+				//float newImaginary = oldReal * -sinf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
+				const float angle = TWOPI * (factorX * fftIndexShift(x, sizeX) + factorY * fftIndexShift(y, sizeY));
+				float newReal = oldReal * cosf(angle);
+				float newImaginary = oldReal * -sinf(angle);
 
-			const float oldReal = imagePixel->x;
-			//float newReal = oldReal * cosf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
-			//float newImaginary = oldReal * -sinf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
-			const float angle = TWOPI * (factorX * fftIndexShift(x, sizeX) + factorY * fftIndexShift(y, sizeY));
-			float newReal = oldReal * cosf(angle);
-			float newImaginary = oldReal * -sinf(angle);
-
-			imagePixel->x = newReal;
-			imagePixel->y = newImaginary;
+				imagePixel->x = newReal;
+				imagePixel->y = newImaginary;
+			}
 		}
 		std::cout << "\n";
 	}
