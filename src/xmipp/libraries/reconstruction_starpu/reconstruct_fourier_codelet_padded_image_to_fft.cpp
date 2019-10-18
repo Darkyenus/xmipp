@@ -127,7 +127,7 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 			const float oldReal = imagePixel->x;
 			//float newReal = oldReal * cosf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
 			//float newImaginary = oldReal * -sinf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
-			const float angle = TWOPI * (factorX * fftIndexShift(x) + factorY * fftIndexShift(y));
+			const float angle = TWOPI * (factorX * fftIndexShift(x, sizeX) + factorY * fftIndexShift(y, sizeY));
 			float newReal = oldReal * cosf(angle);
 			float newImaginary = oldReal * -sinf(angle);
 
