@@ -61,6 +61,20 @@ inline float fft_IDX2DIGFREQ(int idx, int size) {
 	return ((idx <= (size / 2)) ? idx : (-size + idx)) / (float) size;
 }
 
+/**
+ * For fft shift index i returns a value gained by first subtracting size/2 from it and then CenterFFT/fftshift shifting it.
+ * For example for indices 0 to 12 and size 13 returns:
+ * 0   1   2   3   4   5   6  -6  -5  -4  -3  -2  -1
+ */
+inline unsigned fftIndexShift(unsigned i, unsigned size) {
+	unsigned halfSize = size / 2;
+	if (i <= halfSize) {
+		return i;
+	} else {
+		return i - size;
+	}
+}
+
 // ======================================= CPU =====================================
 
 static void cropAndShift(
@@ -100,8 +114,8 @@ static void cropAndShift(
 
 static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t sizeY, uint32_t memorySizeX, float shiftX, float shiftY) {
 	// https://www.arc.id.au/ZoomFFT.html
-	// https://www.clear.rice.edu/elec301/Projects01/image_filt/properties.html#shiftp
 	// https://stackoverflow.com/questions/25827916/matlab-shifting-an-image-using-fft
+	// https://www.clear.rice.edu/elec301/Projects01/image_filt/properties.html#shiftp
 	// http://www.thefouriertransform.com/transform/properties.php
 	const float factorX = shiftX / sizeX;
 	const float factorY = shiftY / sizeY;
@@ -113,7 +127,7 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 			const float oldReal = imagePixel->x;
 			//float newReal = oldReal * cosf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
 			//float newImaginary = oldReal * -sinf(TWOPI * (shiftX * x / sizeX + shiftY * y / sizeY));
-			const float angle = TWOPI * (factorX * x + factorY * y);
+			const float angle = TWOPI * (factorX * fftIndexShift(x) + factorY * fftIndexShift(y));
 			float newReal = oldReal * cosf(angle);
 			float newImaginary = oldReal * -sinf(angle);
 
@@ -159,13 +173,28 @@ static void testFrequencyDomainShift() {
 {-0.50000, + 0.86603}, {  1.00000, - 0.00000}, {-0.50000, - 0.86603},
 	};
 	/*
+	 Original:
+	 0 0 0
+	 0 1 0
+	 0 0 0
+
 	 Expected:
 	 1.00000 + 0.00000i  -0.50000 + 0.86603i  -0.50000 - 0.86603i
 	-0.50000 - 0.86603i   1.00000 + 0.00000i  -0.50000 + 0.86603i
 	-0.50000 + 0.86603i  -0.50000 - 0.86603i   1.00000 - 0.00000i
 
-	 Got:
+	 0 0 0
+	 0 0 1
+	 0 0 0
 
+	 Got:
+     1.00000 + 0.00000i   0.25000 + 0.43300i   0.25000 - 0.43300i
+    -0.50000 + 0.00000i   0.25000 + 0.43300i  -0.50000 + 0.86600i
+    -0.50000 + 0.00000i  -0.50000 - 0.86600i   0.25000 - 0.43300i
+
+	0.00000   0.00000   0.00000
+	0.00001   0.00000   0.49999
+	0.49999   0.00001   0.00000
 	 */
 
 	frequencyDomainShiftCpu(image, size, size, size, 1, 0);
