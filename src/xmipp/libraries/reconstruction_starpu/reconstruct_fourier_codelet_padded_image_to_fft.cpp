@@ -151,12 +151,6 @@ static void testFrequencyDomainShift() {
 		{-0.88368, + 0.58689}, {  0.95534, + 0.41150},{ -0.01675, - 1.09332}
 	};
 
-	/*
-		 1.033 -0.000i   0.285 0.494i   -0.266 0.505i
-		-0.884 0.000i   0.008 0.015i   0.446 -0.845i
-		-0.884 0.000i   -0.478 -0.827i   -0.008 0.015i
-	 */
-
 	frequencyDomainShiftCpu(image, size, size, size, 1, 0);
 
 	for (int y = 0; y < size; ++y) {
