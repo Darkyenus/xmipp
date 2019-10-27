@@ -168,7 +168,8 @@ static void frequencyDomainShiftCpu(double2* image, uint32_t sizeX, uint32_t siz
 #include <core/xmipp_fft.h>
 #include <reconstruction_cuda/cuda_gpu_geo_shift_transformer.cpp>
 
-static void generateTestImage(Image<double>& testImage, const int testImageSize) {
+template<typename T>
+static void generateTestImage(Image<T>& testImage, int testImageSize) {
 	auto& testImageData = testImage.data;
 	testImageData.resizeNoCopy(testImageSize, testImageSize);
 	testImageData.setXmippOrigin();
@@ -256,13 +257,13 @@ static void testFrequencyDomainShift() {
 	}
 
 	{
-		Image<double> testImage;
+		Image<float> testImage;
 		generateTestImage(testImage, testImageSize);
 
-		GeoShiftTransformer<double> transformer;
+		GeoShiftTransformer<float> transformer;
 		transformer.init(GPU(), testImageSize, testImageSize, 1, 0, nullptr);
 
-		MultidimArray<double> testImageOutput;
+		MultidimArray<float> testImageOutput;
 		transformer.applyShift(testImageOutput, testImage.data, shiftX, shiftY);
 
 		testImageOutput.write(FileName("SHIFT_TEST_fft_strelak.tiff"));
