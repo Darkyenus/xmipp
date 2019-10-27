@@ -197,7 +197,7 @@ static void testFrequencyDomainShift() {
 	}
 	tested = true;
 
-	int testImageSize = 13;
+	int testImageSize = 5;
 	double shiftX = 15.5;
 	double shiftY = -13;
 
@@ -235,7 +235,7 @@ static void testFrequencyDomainShift() {
 				(uint32_t)testImageFFT.getDimensions().ydim,
 				(uint32_t)testImageFFT.getDimensions().xdim, (float)shiftX, (float)shiftY);
 
-		std::cout << std::fixed << std::setprecision(3) << "after_shift = [ ";
+		std::cout << std::fixed << std::setprecision(8) << "after_shift = [ ";
 		for (int i = 0; i < testImageFFT.getSize(); ++i) {
 			float2& c = testImageFFTFloat[i];
 			testImageFFT.data[i] = std::complex<double>(c.x, c.y);
