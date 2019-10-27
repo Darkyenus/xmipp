@@ -263,7 +263,7 @@ static void testFrequencyDomainShift() {
 		transformer.init(GPU(), testImageSize, testImageSize, 1, 0, nullptr);
 
 		MultidimArray<double> testImageOutput;
-		transformer.applyShift(testImageOutput, testImage, shiftX, shiftY);
+		transformer.applyShift(testImageOutput, testImage.data, shiftX, shiftY);
 
 		testImageOutput.write(FileName("SHIFT_TEST_fft_strelak.tiff"));
 	}
