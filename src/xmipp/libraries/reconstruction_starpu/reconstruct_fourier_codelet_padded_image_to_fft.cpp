@@ -187,7 +187,7 @@ static void testFrequencyDomainShift() {
 
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
-		frequencyDomainShiftCpu((float2*)testImageFFT(),
+		frequencyDomainShiftCpu((float2*)testImageFFT.data,
 				(uint32_t)testImageFFT.getDimensions().xdim,
 				(uint32_t)testImageFFT.getDimensions().ydim,
 				(uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
