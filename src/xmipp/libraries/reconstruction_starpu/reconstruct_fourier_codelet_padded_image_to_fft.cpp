@@ -172,7 +172,7 @@ static void testFrequencyDomainShift() {
 
 	{
 		Image<double> testImage;
-		generateTestImage(testImage, 120);
+		generateTestImage(testImage, 121);
 		testImage.write(FileName("SHIFT_TEST_normal_before.tiff"));
 		testImage.setShifts(15.5, -13);
 		testImage.setFlip(false);
@@ -182,7 +182,7 @@ static void testFrequencyDomainShift() {
 
 	{
 		Image<double> testImage;
-		generateTestImage(testImage, 120);
+		generateTestImage(testImage, 121);
 		testImage.write(FileName("SHIFT_TEST_fft_before.tiff"));
 
 		MultidimArray<std::complex<double>> testImageFFT;
