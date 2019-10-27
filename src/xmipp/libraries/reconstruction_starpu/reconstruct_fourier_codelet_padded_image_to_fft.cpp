@@ -166,6 +166,7 @@ static void frequencyDomainShiftCpu(double2* image, uint32_t sizeX, uint32_t siz
 #include <data/projection.h>
 #include <math.h>
 #include <core/xmipp_fft.h>
+#include <reconstruction_cuda/cuda_gpu_geo_shift_transformer.h>
 
 static void generateTestImage(Image<double>& testImage, const int testImageSize) {
 	auto& testImageData = testImage.data;
@@ -195,11 +196,15 @@ static void testFrequencyDomainShift() {
 	}
 	tested = true;
 
+	int testImageSize = 121;
+	double shiftX = 15.5;
+	double shiftY = -13;
+
 	{
 		Image<double> testImage;
-		generateTestImage(testImage, 121);
+		generateTestImage(testImage, testImageSize);
 		testImage.write(FileName("SHIFT_TEST_before.tiff"));
-		testImage.setShifts(15.5, -13);
+		testImage.setShifts(shiftX, shiftY);
 		testImage.setFlip(false);
 		testImage.selfApplyGeometry(3, true, true);
 		testImage.write(FileName("SHIFT_TEST_normal.tiff"));
@@ -207,7 +212,7 @@ static void testFrequencyDomainShift() {
 
 	{
 		Image<double> testImage;
-		generateTestImage(testImage, 121);
+		generateTestImage(testImage, testImageSize);
 
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
@@ -221,7 +226,7 @@ static void testFrequencyDomainShift() {
 		frequencyDomainShiftCpu(testImageFFTFloat,
 				(uint32_t)testImageFFT.getDimensions().xdim,
 				(uint32_t)testImageFFT.getDimensions().ydim,
-				(uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
+				(uint32_t)testImageFFT.getDimensions().xdim, (float)shiftX, (float)shiftY);
 
 		for (int i = 0; i < testImageFFT.getSize(); ++i) {
 			float2& c = testImageFFTFloat[i];
@@ -235,7 +240,7 @@ static void testFrequencyDomainShift() {
 
 	{
 		Image<double> testImage;
-		generateTestImage(testImage, 121);
+		generateTestImage(testImage, testImageSize);
 
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
@@ -243,11 +248,24 @@ static void testFrequencyDomainShift() {
 		frequencyDomainShiftCpu((double2*)testImageFFT.data,
 		                        (uint32_t)testImageFFT.getDimensions().xdim,
 		                        (uint32_t)testImageFFT.getDimensions().ydim,
-		                        (uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
+		                        (uint32_t)testImageFFT.getDimensions().xdim, shiftX, shiftY);
 
 		InverseFourierTransform(testImageFFT, testImage.data);
 
 		testImage.write(FileName("SHIFT_TEST_fft_double.tiff"));
+	}
+
+	{
+		Image<float> testImage;
+		generateTestImage(testImage, testImageSize);
+
+		GeoShiftTransformer<float> transformer;
+		transformer.init(GPU(), testImageSize, testImageSize, 1, 0, nullptr);
+
+		MultidimArray<float> testImageOutput;
+		transformer.applyShift(testImageOutput, testImage, shiftX, shiftY);
+
+		testImageOutput.write(FileName("SHIFT_TEST_fft_strelak.tiff"));
 	}
 
 	/*
