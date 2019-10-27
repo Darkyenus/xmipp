@@ -212,10 +212,10 @@ static void testFrequencyDomainShift() {
 	}
 
 	{
-		Image<float> testImage;
+		Image<double> testImage;
 		generateTestImage(testImage, testImageSize);
 
-		MultidimArray<std::complex<float>> testImageFFT;
+		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
 
 		float2* testImageFFTFloat = (float2*) malloc(sizeof(float2) * testImageFFT.getSize());
