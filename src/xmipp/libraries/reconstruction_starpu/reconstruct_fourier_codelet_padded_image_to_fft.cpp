@@ -188,7 +188,9 @@ static void testFrequencyDomainShift() {
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
 
-		MultidimArray<std::complex<float>> testImageFFTFloat(testImageFFT.xdim, testImageFFT.ydim);
+		MultidimArray<std::complex<float>> testImageFFTFloat;
+		testImageFFTFloat.resize(testImageFFT.getDimensions(), false);
+
 		FOR_ALL_ELEMENTS_IN_ARRAY2D(testImageFFTFloat) {
 				A2D_ELEM(testImageFFTFloat, i, j) = std::complex<float>(A2D_ELEM(testImageFFT, i, j));
 		}
