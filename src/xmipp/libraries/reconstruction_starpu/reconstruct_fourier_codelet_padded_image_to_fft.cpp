@@ -215,36 +215,47 @@ static void testFrequencyDomainShift() {
 		Image<double> testImage;
 		generateTestImage(testImage, testImageSize);
 
+		std::cout << std::fixed << std::setprecision(3) << "before_fft = [ ";
+		for (int iy = 0; iy < testImageSize; ++iy) {
+			for (int ix = 0; ix < testImageSize; ++ix) {
+				std::cout << "(" << testImage.data.data[ix + iy * testImageSize] << ") ";
+			}
+			if (iy + 1 != testImageSize) {
+				std::cout << ";\n";
+			}
+		}
+		std::cout << "];\n";
+
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
 
 		float2* testImageFFTFloat = (float2*) malloc(sizeof(float2) * testImageFFT.getSize());
-		std::cout << std::fixed << std::setprecision(3) << "after_fft = [ ";
+		std::cout << std::fixed << std::setprecision(12) << "after_fft = [ ";
 		for (int i = 0; i < testImageFFT.getSize(); ++i) {
 			std::complex<double>& c = testImageFFT.data[i];
 			testImageFFTFloat[i] = { c.real(), c.imag() };
-			std::cout << "(" << c.real() << "+" << c.imag() << +"i) ";
+			std::cout << "(" << c.real() << "+" << c.imag() << "i) ";
 			if ((i + 1) % testImageFFT.xdim == 0 && i + 1 < testImageFFT.getSize()) {
 				std::cout << ";\n";
 			}
 		}
-		std::cout<<"]\n";
+		std::cout<<"];\n";
 
 		frequencyDomainShiftCpu(testImageFFTFloat,
 				(uint32_t)testImageFFT.getDimensions().xdim,
 				(uint32_t)testImageFFT.getDimensions().ydim,
 				(uint32_t)testImageFFT.getDimensions().xdim, (float)shiftX, (float)shiftY);
 
-		std::cout << std::fixed << std::setprecision(8) << "after_shift = [ ";
+		std::cout << std::fixed << std::setprecision(12) << "after_shift = [ ";
 		for (int i = 0; i < testImageFFT.getSize(); ++i) {
 			float2& c = testImageFFTFloat[i];
 			testImageFFT.data[i] = std::complex<double>(c.x, c.y);
-			std::cout << "(" << c.x << "+" << c.y << +"i) ";
+			std::cout << "(" << c.x << "+" << c.y << "i) ";
 			if ((i + 1) % testImageFFT.xdim == 0 && i + 1 < testImageFFT.getSize()) {
 				std::cout << ";\n";
 			}
 		}
-		std::cout<<"]\n";
+		std::cout<<"];\n";
 
 
 		free(testImageFFTFloat);
