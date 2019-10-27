@@ -188,21 +188,21 @@ static void testFrequencyDomainShift() {
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
 
-		MultidimArray<std::complex<float>> testImageFFTFloat;
-		testImageFFTFloat.resizeNoCopy(testImageFFT.ydim, testImageFFT.xdim);
-
-		FOR_ALL_ELEMENTS_IN_ARRAY2D(testImageFFTFloat) {
-				A2D_ELEM(testImageFFTFloat, i, j) = std::complex<float>(A2D_ELEM(testImageFFT, i, j));
+		float2* testImageFFTFloat = malloc(sizeof(float2) * testImageFFT.getSize());
+		for (int i = 0; i < testImageFFT.getSize(); ++i) {
+			std::complex<double>& c = testImageFFT.data[i];
+			testImageFFTFloat[i] = { c.real(), c.imag() };
 		}
 
-		frequencyDomainShiftCpu((float2*)testImageFFTFloat.data,
+		frequencyDomainShiftCpu(testImageFFTFloat,
 				(uint32_t)testImageFFT.getDimensions().xdim,
 				(uint32_t)testImageFFT.getDimensions().ydim,
 				(uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
 
-		FOR_ALL_ELEMENTS_IN_ARRAY2D(testImageFFTFloat) {
-				A2D_ELEM(testImageFFT, i, j) = std::complex<double>(A2D_ELEM(testImageFFTFloat, i, j));
-			}
+		for (int i = 0; i < testImageFFT.getSize(); ++i) {
+			float2& c = testImageFFTFloat[i];
+			testImageFFT.data[i] = std::complex<double>(c.x, c.y);
+		}
 		InverseFourierTransform(testImageFFT, testImage.data);
 
 		testImage.write(FileName("SHIFT_TEST_fft_after.jpg"));
