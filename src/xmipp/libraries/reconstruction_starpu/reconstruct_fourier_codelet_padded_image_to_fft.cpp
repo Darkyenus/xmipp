@@ -203,6 +203,7 @@ static void testFrequencyDomainShift() {
 			float2& c = testImageFFTFloat[i];
 			testImageFFT.data[i] = std::complex<double>(c.x, c.y);
 		}
+		free(testImageFFTFloat);
 		InverseFourierTransform(testImageFFT, testImage.data);
 
 		testImage.write(FileName("SHIFT_TEST_fft_after.jpg"));
