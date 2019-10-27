@@ -187,11 +187,20 @@ static void testFrequencyDomainShift() {
 
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
-		if (false)
-		frequencyDomainShiftCpu((float2*)testImageFFT.data,
+
+		MultidimArray<std::complex<float>> testImageFFTFloat(testImageFFT.xdim, testImageFFT.ydim);
+		FOR_ALL_ELEMENTS_IN_ARRAY2D(testImageFFTFloat.data) {
+				A2D_ELEM(testImageFFTFloat, i, j) = std::complex<float>(A2D_ELEM(testImageFFT, i, j));
+		}
+
+		frequencyDomainShiftCpu((float2*)testImageFFTFloat.data,
 				(uint32_t)testImageFFT.getDimensions().xdim,
 				(uint32_t)testImageFFT.getDimensions().ydim,
 				(uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
+
+		FOR_ALL_ELEMENTS_IN_ARRAY2D(testImageFFTFloat.data) {
+				A2D_ELEM(testImageFFT, i, j) = std::complex<double>(A2D_ELEM(testImageFFTFloat, i, j));
+			}
 		InverseFourierTransform(testImageFFT, testImage.data);
 
 		testImage.write(FileName("SHIFT_TEST_fft_after.jpg"));
