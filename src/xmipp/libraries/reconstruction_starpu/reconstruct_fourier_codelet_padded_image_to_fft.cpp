@@ -197,7 +197,7 @@ static void testFrequencyDomainShift() {
 	}
 	tested = true;
 
-	int testImageSize = 13;
+	int testImageSize = 512;
 	double shiftX = 15.5;
 	double shiftY = -13;
 
