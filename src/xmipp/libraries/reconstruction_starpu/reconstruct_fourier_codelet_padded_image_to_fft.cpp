@@ -137,6 +137,32 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 	}
 }
 
+
+#include <data/projection.h>
+#include <math.h>
+#include <core/xmipp_fft.h>
+
+static void generateTestImage(Image<double>& testImage, const int testImageSize) {
+	auto& testImageData = testImage.data;
+	testImageData.resizeNoCopy(testImageSize, testImageSize);
+	testImageData.setXmippOrigin();
+	FOR_ALL_ELEMENTS_IN_ARRAY2D(testImageData) {
+			if (j < 0) {
+				if (j*j + i*i < (testImageSize/4) * (testImageSize/4)) {
+					A2D_ELEM(testImageData, i, j) = 1;
+				} else {
+					A2D_ELEM(testImageData, i, j) = 0;
+				}
+			} else {
+				if (abs(j) + abs(i) < (testImageSize/4)) {
+					A2D_ELEM(testImageData, i, j) = 1;
+				} else {
+					A2D_ELEM(testImageData, i, j) = 0;
+				}
+			}
+		}
+}
+
 static void testFrequencyDomainShift() {
 	static bool tested = false;
 	if (tested) {
@@ -144,6 +170,33 @@ static void testFrequencyDomainShift() {
 	}
 	tested = true;
 
+	{
+		Image<double> testImage;
+		generateTestImage(testImage, 120);
+		testImage.write(FileName("SHIFT_TEST_normal_before.jpg"));
+		testImage.setShifts(15.5, -13);
+		testImage.setFlip(false);
+		testImage.selfApplyGeometry(3, true, true);
+		testImage.write(FileName("SHIFT_TEST_normal_after.jpg"));
+	}
+
+	{
+		Image<double> testImage;
+		generateTestImage(testImage, 120);
+		testImage.write(FileName("SHIFT_TEST_fft_before.jpg"));
+
+		MultidimArray<std::complex<double>> testImageFFT;
+		FourierTransform(testImage.data, testImageFFT);
+		frequencyDomainShiftCpu((*float2)testImageFFT(),
+				(uint32_t)testImageFFT.getDimensions().xdim,
+				(uint32_t)testImageFFT.getDimensions().ydim,
+				(uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
+		InverseFourierTransform(testImageFFT, testImage.data);
+
+		testImage.write(FileName("SHIFT_TEST_fft_after.jpg"));
+	}
+
+	/*
 	int size = 3;
 	float2 image[] = {
 		{1.03268 , + 0.00000}, { -0.57095, - 0.86842},{ -0.57095, + 0.86842},
@@ -160,6 +213,7 @@ static void testFrequencyDomainShift() {
 		}
 		std::cout << "\n";
 	}
+	 */
 }
 
 void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
