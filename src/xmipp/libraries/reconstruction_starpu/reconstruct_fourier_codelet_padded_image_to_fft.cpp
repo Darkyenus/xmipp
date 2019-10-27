@@ -269,6 +269,23 @@ static void testFrequencyDomainShift() {
 		testImageOutput.write(FileName("SHIFT_TEST_fft_strelak.tiff"));
 	}
 
+	{
+		Image<float> testImage;
+		generateTestImage(testImage, testImageSize);
+
+		MultidimArray<std::complex<float>> testImageFFT;
+		FourierTransformHalf(testImage.data, testImageFFT);
+
+		frequencyDomainShiftCpu((float2*)testImageFFT.data,
+		                        (uint32_t)testImage.data.xdim,
+		                        (uint32_t)testImage.data.ydim,
+		                        (uint32_t)testImageFFT.xdim, (float)shiftX, (float)shiftY);
+
+		InverseFourierTransformHalf(testImageFFT, testImage.data);
+
+		testImage.write(FileName("SHIFT_TEST_fft_half.tiff"));
+	}
+
 	/*
 	int size = 3;
 	float2 image[] = {
