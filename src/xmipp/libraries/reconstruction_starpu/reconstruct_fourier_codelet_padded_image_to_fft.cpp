@@ -137,6 +137,31 @@ static void frequencyDomainShiftCpu(float2* image, uint32_t sizeX, uint32_t size
 	}
 }
 
+static void frequencyDomainShiftCpu(double2* image, uint32_t sizeX, uint32_t sizeY, uint32_t memorySizeX, double shiftX, double shiftY) {
+	// https://www.arc.id.au/ZoomFFT.html
+	// https://stackoverflow.com/questions/25827916/matlab-shifting-an-image-using-fft
+	// https://www.clear.rice.edu/elec301/Projects01/image_filt/properties.html#shiftp
+	// http://www.thefouriertransform.com/transform/properties.php
+	const double factorX = shiftX / sizeX;
+	const double factorY = shiftY / sizeY;
+	for (uint32_t y = 0; y < sizeY; ++y) {
+		double2* imageRow = image + y * memorySizeX;
+		for (uint32_t x = 0; x < memorySizeX; ++x) {
+			const double angle = -(TWOPI) * ((factorX * fftIndexShift(x, sizeX)) + (factorY * fftIndexShift(y, sizeY)));
+			const double factorReal = cos(angle);
+			const double factorImag = sin(angle);
+
+			double2* imagePixel = imageRow + x;
+			const double pixelReal = imagePixel->x;
+			const double pixelImag = imagePixel->y;
+			const double newReal = pixelReal * factorReal - pixelImag * factorImag;
+			const double newImag = pixelReal * factorImag + pixelImag * factorReal;
+			imagePixel->x = newReal;
+			imagePixel->y = newImag;
+		}
+	}
+}
+
 
 #include <data/projection.h>
 #include <math.h>
@@ -173,17 +198,16 @@ static void testFrequencyDomainShift() {
 	{
 		Image<double> testImage;
 		generateTestImage(testImage, 121);
-		testImage.write(FileName("SHIFT_TEST_normal_before.tiff"));
+		testImage.write(FileName("SHIFT_TEST_before.tiff"));
 		testImage.setShifts(15.5, -13);
 		testImage.setFlip(false);
 		testImage.selfApplyGeometry(3, true, true);
-		testImage.write(FileName("SHIFT_TEST_normal_after.tiff"));
+		testImage.write(FileName("SHIFT_TEST_normal.tiff"));
 	}
 
 	{
 		Image<double> testImage;
 		generateTestImage(testImage, 121);
-		testImage.write(FileName("SHIFT_TEST_fft_before.tiff"));
 
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
@@ -206,7 +230,24 @@ static void testFrequencyDomainShift() {
 		free(testImageFFTFloat);
 		InverseFourierTransform(testImageFFT, testImage.data);
 
-		testImage.write(FileName("SHIFT_TEST_fft_after.tiff"));
+		testImage.write(FileName("SHIFT_TEST_fft.tiff"));
+	}
+
+	{
+		Image<double> testImage;
+		generateTestImage(testImage, 121);
+
+		MultidimArray<std::complex<double>> testImageFFT;
+		FourierTransform(testImage.data, testImageFFT);
+
+		frequencyDomainShiftCpu((double2*)testImageFFT.data,
+		                        (uint32_t)testImageFFT.getDimensions().xdim,
+		                        (uint32_t)testImageFFT.getDimensions().ydim,
+		                        (uint32_t)testImageFFT.getDimensions().xdim, 15.5f, -13);
+
+		InverseFourierTransform(testImageFFT, testImage.data);
+
+		testImage.write(FileName("SHIFT_TEST_fft_double.tiff"));
 	}
 
 	/*
