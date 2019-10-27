@@ -173,17 +173,17 @@ static void testFrequencyDomainShift() {
 	{
 		Image<double> testImage;
 		generateTestImage(testImage, 120);
-		testImage.write(FileName("SHIFT_TEST_normal_before.jpg"));
+		testImage.write(FileName("SHIFT_TEST_normal_before.tiff"));
 		testImage.setShifts(15.5, -13);
 		testImage.setFlip(false);
 		testImage.selfApplyGeometry(3, true, true);
-		testImage.write(FileName("SHIFT_TEST_normal_after.jpg"));
+		testImage.write(FileName("SHIFT_TEST_normal_after.tiff"));
 	}
 
 	{
 		Image<double> testImage;
 		generateTestImage(testImage, 120);
-		testImage.write(FileName("SHIFT_TEST_fft_before.jpg"));
+		testImage.write(FileName("SHIFT_TEST_fft_before.tiff"));
 
 		MultidimArray<std::complex<double>> testImageFFT;
 		FourierTransform(testImage.data, testImageFFT);
@@ -206,7 +206,7 @@ static void testFrequencyDomainShift() {
 		free(testImageFFTFloat);
 		InverseFourierTransform(testImageFFT, testImage.data);
 
-		testImage.write(FileName("SHIFT_TEST_fft_after.jpg"));
+		testImage.write(FileName("SHIFT_TEST_fft_after.tiff"));
 	}
 
 	/*
