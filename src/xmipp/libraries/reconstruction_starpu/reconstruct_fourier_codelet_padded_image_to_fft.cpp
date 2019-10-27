@@ -263,8 +263,8 @@ static void testFrequencyDomainShift() {
 		GeoShiftTransformer<float> transformer;
 		transformer.init(GPU(), testImageSize, testImageSize, 1, 0, nullptr);
 
-		MultidimArray<float> testImageOutput;
-		transformer.applyShift(testImageOutput, testImage.data, shiftX, shiftY);
+		Image<float> testImageOutput;
+		transformer.applyShift(testImageOutput.data, testImage.data, shiftX, shiftY);
 
 		testImageOutput.write(FileName("SHIFT_TEST_fft_strelak.tiff"));
 	}
