@@ -166,7 +166,7 @@ static void frequencyDomainShiftCpu(double2* image, uint32_t sizeX, uint32_t siz
 #include <data/projection.h>
 #include <math.h>
 #include <core/xmipp_fft.h>
-#include <reconstruction_cuda/cuda_gpu_geo_shift_transformer.h>
+#include <reconstruction_cuda/cuda_gpu_geo_shift_transformer.cpp>
 
 static void generateTestImage(Image<double>& testImage, const int testImageSize) {
 	auto& testImageData = testImage.data;
