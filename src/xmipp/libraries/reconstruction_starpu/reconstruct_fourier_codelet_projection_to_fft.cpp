@@ -29,6 +29,7 @@
 #include <reconstruction_cuda/cuda_xmipp_utils.h>
 #include <reconstruction_cuda/cuda_asserts.h>
 
+#include <math.h>
 #include <fftw3.h>
 #include <starpu.h>
 #include <pthread.h>
@@ -97,18 +98,18 @@ static void cropAndShift(
 	}
 }
 
-void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
+void func_projection_to_fft_cpu(void **buffers, void *cl_arg) {
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	float2* temporaryFftScratch = (float2*)STARPU_MATRIX_GET_PTR(buffers[2]);
 	const uint32_t noOfImages = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[3]))->noOfImages;
-	const PaddedImageToFftArgs& arg = *(PaddedImageToFftArgs*)(cl_arg);
+	const ProjectionToFftArgs& arg = *(ProjectionToFftArgs*)(cl_arg);
 
 	const uint32_t rawFftSizeX = STARPU_MATRIX_GET_NX(buffers[2]);
 	const uint32_t rawFftSizeY = STARPU_MATRIX_GET_NY(buffers[2]);
 
 	const size_t imageStridePaddedImage = STARPU_VECTOR_GET_ELEMSIZE(buffers[0]) / sizeof(float);
-	const size_t temporaryFftScratchSizeBytes = STARPU_VECTOR_GET_ELEMSIZE(buffers[2]) * STARPU_VECTOR_GET_NX(buffers[2]);
+	const size_t temporaryFftScratchSizeBytes = STARPU_MATRIX_GET_ELEMSIZE(buffers[2]) * rawFftSizeX * rawFftSizeY;
 	const size_t imageStrideOutput = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float2);
 
 	if (alignmentOf(inPaddedImage) < ALIGNMENT || alignmentOf(temporaryFftScratch) < ALIGNMENT) {
@@ -119,13 +120,13 @@ void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg) {
 	static pthread_mutex_t fftw_plan_mutex = PTHREAD_MUTEX_INITIALIZER;
 	// Planning API of FFTW is not thread safe
 	pthread_mutex_lock(&fftw_plan_mutex);
-	fftwf_plan plan = fftwf_plan_dft_r2c_2d(arg.paddedImageSize, arg.paddedImageSize,
-			inPaddedImage, (fftwf_complex*) temporaryFftScratch, FFTW_ESTIMATE);
+	fftwf_plan plan = fftwf_plan_dft_r2c_2d(arg.projectionSize, arg.projectionSize,
+	                                        inPaddedImage, (fftwf_complex*) temporaryFftScratch, FFTW_ESTIMATE);
 	pthread_mutex_unlock(&fftw_plan_mutex);
 
 	assert(plan != nullptr);
 
-	const float normalizationFactor = 1.0f / (arg.paddedImageSize * arg.paddedImageSize);
+	const float normalizationFactor = 1.0f / (arg.projectionSize * arg.projectionSize);
 
 	float* in = inPaddedImage;
 	float2* out = outProcessedFft;
@@ -191,18 +192,18 @@ void convertImagesKernel(
 	}
 }
 
-void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
+void func_projection_to_fft_cuda(void **buffers, void *cl_arg) {
 	float* inPaddedImage = (float*)STARPU_VECTOR_GET_PTR(buffers[0]);
 	float2* outProcessedFft = (float2*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	float2* temporaryFftScratch = (float2*)STARPU_MATRIX_GET_PTR(buffers[2]);
 	const uint32_t noOfImages = ((LoadedImagesBuffer*) STARPU_VARIABLE_GET_PTR(buffers[3]))->noOfImages;
-	const PaddedImageToFftArgs& arg = *(PaddedImageToFftArgs*)(cl_arg);
+	const ProjectionToFftArgs& arg = *(ProjectionToFftArgs*)(cl_arg);
 
 	const uint32_t rawFftSizeX = STARPU_MATRIX_GET_NX(buffers[2]);
 	const uint32_t rawFftSizeY = STARPU_MATRIX_GET_NY(buffers[2]);
 
 	const size_t imageStridePaddedImage = STARPU_VECTOR_GET_ELEMSIZE(buffers[0]) / sizeof(float);
-	const size_t temporaryFftScratchSizeBytes = STARPU_VECTOR_GET_ELEMSIZE(buffers[2]) * STARPU_VECTOR_GET_NX(buffers[2]);
+	const size_t temporaryFftScratchSizeBytes = STARPU_MATRIX_GET_ELEMSIZE(buffers[2]) * rawFftSizeX * rawFftSizeY;
 	const size_t imageStrideOutput = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float2);
 
 	if (alignmentOf(inPaddedImage) < ALIGNMENT || alignmentOf(temporaryFftScratch) < ALIGNMENT) {
@@ -213,10 +214,10 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 	//TODO Investigate the use of cuFFTAdvisor to achieve better performance
 	//TODO Cache the plan explicitly
 	cufftHandle plan;
-	gpuErrchkFFT(cufftPlan2d(&plan, arg.paddedImageSize, arg.paddedImageSize, cufftType::CUFFT_R2C));
+	gpuErrchkFFT(cufftPlan2d(&plan, arg.projectionSize, arg.projectionSize, cufftType::CUFFT_R2C));
 	gpuErrchkFFT(cufftSetStream(plan, starpu_cuda_get_local_stream()));
 
-	const float normalizationFactor = 1.0f / (arg.paddedImageSize * arg.paddedImageSize);
+	const float normalizationFactor = 1.0f / (arg.projectionSize * arg.projectionSize);
 
 	float* in = inPaddedImage;
 	float2* out = outProcessedFft;
@@ -231,9 +232,11 @@ void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg) {
 		// Execute FFT plan
 		gpuErrchkFFT(cufftExecR2C(plan, in, temporaryFftScratch));
 
-		// Process results, one thread for each pixel of raw FFT
+		// One thread for each pixel of raw FFT
 		dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
 		dim3 dimGrid((rawFftSizeX + dimBlock.x - 1) / dimBlock.x, (rawFftSizeY + dimBlock.y - 1) / dimBlock.y);
+
+		// Process results
 		convertImagesKernel<<<dimGrid, dimBlock, 0, starpu_cuda_get_local_stream()>>>(
 				temporaryFftScratch, rawFftSizeX, rawFftSizeY, arg.fftSizeX,
 				out, arg.maxResolutionSqr, normalizationFactor);

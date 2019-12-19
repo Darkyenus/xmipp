@@ -80,6 +80,11 @@ struct LoadedImagesBuffer {
 	uint32_t noOfImages;
 };
 
+struct ProjectionShiftBuffer {
+	/** Sub-pixel shifts (translation) to apply to the image. */
+	float shiftX, shiftY;
+};
+
 // ============================== Argument structures ==============================
 
 /** MUST NOT BE COPIED!!! */
@@ -95,16 +100,21 @@ struct LoadProjectionArgs {
 	const bool fastLateBlobbing;
 
 	/** Size of source bitmap images. (Regardless of their actual size, they are all padded to this size) */
-	uint32_t paddedImageSize;
+	uint32_t paddedProjectionSize;
 	/** Dimensions of FFTs. */
 	uint32_t fftSizeX, fftSizeY;
 };
 
-struct PaddedImageToFftArgs {
+struct ProjectionShiftArgs {
+	/** Size of source bitmap images. (Regardless of their actual size, they are all padded to this size) */
+	uint32_t projectionSize;
+};
+
+struct ProjectionToFftArgs {
 	float maxResolutionSqr;
 
 	/** Size of source bitmap images. (Regardless of their actual size, they are all padded to this size) */
-	uint32_t paddedImageSize;
+	uint32_t projectionSize;
 	/** Dimensions of FFTs. */
 	uint32_t fftSizeX, fftSizeY;
 };
@@ -126,8 +136,11 @@ struct ReconstructFftArgs {
 
 extern void func_load_projections(void* buffers[], void* cl_arg);
 
-extern void func_padded_image_to_fft_cpu(void **buffers, void *cl_arg);
-extern void func_padded_image_to_fft_cuda(void **buffers, void *cl_arg);
+extern void func_projection_shift_cpu(void **buffers, void *cl_arg);
+extern void func_projection_shift_cuda(void **buffers, void *cl_arg);
+
+extern void func_projection_to_fft_cpu(void **buffers, void *cl_arg);
+extern void func_projection_to_fft_cuda(void **buffers, void *cl_arg);
 
 /** Copy constants used for calculation to GPU memory. Blocking operation. */
 void reconstruct_cuda_initialize_constants(
@@ -154,8 +167,10 @@ struct Codelets {
 
 	/** Initial data loading. Loads data for a single batch. */
 	starpu_codelet load_projections{0};
+	/** Shift the projection image. */
+	starpu_codelet projection_shift{0};
 	/** Crops and shifts loaded and fourier-transformed images. */
-	starpu_codelet padded_image_to_fft{0};
+	starpu_codelet projection_to_fft{0};
 	/** Reconstructs FFTs into volume field. */
 	starpu_codelet reconstruct_fft{0};
 
