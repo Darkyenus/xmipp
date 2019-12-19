@@ -38,14 +38,35 @@
  * @param shiftMatrix 3x3 matrix for 2D affine transformations
  * @param orientationMatrix 3x3 matrix for 3D rotation
  */
-static void loadMatrices(MDRow& row, Matrix2D<double>& shiftMatrix, Matrix2D<double>& orientationMatrix) {
-	if (!row.containsLabel(MDL_TRANSFORM_MATRIX)) {
-		geo2TransformationMatrix(row, shiftMatrix, /*only_apply_shifts*/ true);
-	} else {
-		//TODO This ignores only_apply_shifts!
-		String matrixStr;
-		row.getValue(MDL_TRANSFORM_MATRIX, matrixStr);
-		string2TransformationMatrix(matrixStr, shiftMatrix, 3);
+static void loadMatrices(MDRow& row, double& shiftX, double &shiftY, bool &flip, Matrix2D<double>& orientationMatrix) {
+	if (row.containsLabel(MDL_TRANSFORM_MATRIX)) {
+		static bool warned = false;
+		if (!warned) {
+			std::cerr << "\nWARNING: input image contains MDL_TRANSFORM_MATRIX, which is not supported and will be ignored\n\n";
+			warned = true;
+		}
+
+		//String matrixStr;
+		//row.getValue(MDL_TRANSFORM_MATRIX, matrixStr);
+		//Matrix2D<double> transformMatrix;
+		//string2TransformationMatrix(matrixStr, transformMatrix, 3);
+		// TODO Support this if needed
+	}
+
+	shiftX = shiftY = 0;
+	flip = false;
+
+	row.getValue(MDL_SHIFT_X, shiftX);
+	row.getValue(MDL_SHIFT_Y, shiftY);
+	row.getValue(MDL_FLIP, flip);
+
+	double scale = 1;
+	if (row.getValue(MDL_SCALE, scale) && scale != 1) {
+		static bool warned = false;
+		if (!warned) {
+			std::cerr << "\nWARNING: input image contains MDL_SCALE, which is not supported and will be ignored\n\n";
+			warned = true;
+		}
 	}
 
 	// Compute the coordinate axes associated to this projection
@@ -53,6 +74,7 @@ static void loadMatrices(MDRow& row, Matrix2D<double>& shiftMatrix, Matrix2D<dou
 	row.getValue(MDL_ANGLE_ROT, rot);
 	row.getValue(MDL_ANGLE_TILT, tilt);
 	row.getValue(MDL_ANGLE_PSI, psi);
+
 	Euler_angles2matrix(rot, tilt, psi, orientationMatrix);
 	orientationMatrix = orientationMatrix.transpose();
 }
@@ -64,9 +86,9 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 	float* outImageData = (float*)STARPU_VECTOR_GET_PTR(buffers[1]);
 	const size_t outImageDataStride = STARPU_VECTOR_GET_ELEMSIZE(buffers[1]) / sizeof(float);
 	auto* outSpaces = (RecFourierProjectionTraverseSpace*)STARPU_MATRIX_GET_PTR(buffers[2]);
+	auto* transformArgs = (ProjectionShiftBuffer*)STARPU_VECTOR_GET_PTR(buffers[3]);
 
-	MultidimArray<float> transformedImageData;
-	MultidimArray<float> paddedImageData(arg.paddedImageSize, arg.paddedImageSize); // Declared here so that internal allocated memory can be reused
+	MultidimArray<float> paddedImageData(arg.paddedProjectionSize, arg.paddedProjectionSize); // Declared here so that internal allocated memory can be reused
 
 	uint32_t traverseSpaceIndex = 0;
 	uint32_t projectionIndex = 0;
@@ -98,19 +120,31 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 			continue;
 		}
 
-		Matrix2D<double> shiftMatrix(3, 3);
 		Matrix2D<double> orientationMatrix(3, 3);
-		loadMatrices(row, shiftMatrix, orientationMatrix);
+		bool flip = false;
+		{
+			double shiftX = 0, shiftY = 0;
+			ProjectionShiftBuffer &transformArg = transformArgs[projectionIndex];
+			loadMatrices(row, shiftX, shiftY, flip, orientationMatrix);
+			transformArg.shiftX = (float)shiftX;
+			transformArg.shiftY = (float)shiftY;
+		}
 
-		transformedImageData.resizeNoCopy(proj());
-		// FIXME following line is a current bottleneck, as it calls BSpline interpolation
-		applyGeometry(BSPLINE3, transformedImageData, proj.data, shiftMatrix, IS_NOT_INV, WRAP);
-
-		paddedImageData.initZeros(arg.paddedImageSize, arg.paddedImageSize);
+		paddedImageData.initZeros(arg.paddedProjectionSize, arg.paddedProjectionSize);
 		paddedImageData.setXmippOrigin();
-		transformedImageData.setXmippOrigin();
-		FOR_ALL_ELEMENTS_IN_ARRAY2D(transformedImageData)
-				A2D_ELEM(paddedImageData,i,j) = static_cast<float>(A2D_ELEM(transformedImageData, i, j));
+
+		MultidimArray<double>& rawImageData = proj.data;
+		rawImageData.setXmippOrigin();
+
+		// Move to the padded image, flip in process if needed
+		// This could be also done later, in projection_shift, but doing it here is free and may allow some optimizations in projection_shift
+		if (!flip) {
+			FOR_ALL_ELEMENTS_IN_ARRAY2D(rawImageData)
+					A2D_ELEM(paddedImageData, i, j) = static_cast<float>(A2D_ELEM(rawImageData, i, j));
+		} else {
+			FOR_ALL_ELEMENTS_IN_ARRAY2D(rawImageData)
+					A2D_ELEM(paddedImageData, -i, -j) = static_cast<float>(A2D_ELEM(rawImageData, i, j));
+		}
 
 #if 0
 		{// Debug dump
@@ -128,10 +162,6 @@ void func_load_projections(void* buffers[], void* cl_arg) {
 			fclose(debug_file);
 		}
 #endif
-
-		// CenterFFT = center for fft (not fft itself)
-		// NOTE(jp): I am not sure why is this done. It seems to flip some signs in the result of FFT according to some pattern.
-		CenterFFT(paddedImageData, true);
 
 		// NOTE(jp): No `continue` skipping after this point, indices to outputs are in lockstep
 		memcpy(outImageData + projectionIndex * outImageDataStride, paddedImageData.data, paddedImageData.getSize() * sizeof(float));

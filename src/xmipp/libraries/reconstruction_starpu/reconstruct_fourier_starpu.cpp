@@ -338,10 +338,14 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 	const uint32_t fftSizeX = maxVolumeIndex / 2;
 	const uint32_t fftSizeY = maxVolumeIndex;
 
-	PaddedImageToFftArgs imageToFftArg = {
+	ProjectionToFftArgs imageToFftArg = {
 			params.maxResolution * params.maxResolution,
 			paddedImgSize,
 			fftSizeX, fftSizeY
+	};
+
+	ProjectionShiftArgs projectionShiftArg = {
+			paddedImgSize
 	};
 
 	ReconstructFftArgs reconstructFftArg = {
@@ -417,9 +421,17 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		starpu_variable_data_register(&amountLoadedHandle, -1, 0, sizeof(LoadedImagesBuffer));
 		starpu_data_set_name(amountLoadedHandle, "Batch Meta Data");
 
-		starpu_data_handle_t paddedImagesDataHandle = {0};
-		starpu_vector_data_register(&paddedImagesDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float), ALIGNMENT));
-		starpu_data_set_name(paddedImagesDataHandle, "Batch Padded Image Data");
+		starpu_data_handle_t projectionDataHandle = {0};
+		starpu_vector_data_register(&projectionDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float), ALIGNMENT));
+		starpu_data_set_name(projectionDataHandle, "Batch Projection Image Data");
+
+		starpu_data_handle_t projectionShiftedDataHandle = {0};
+		starpu_vector_data_register(&projectionShiftedDataHandle, -1, 0, currentBatchSize, align(paddedImgSize * paddedImgSize * sizeof(float), ALIGNMENT));
+		starpu_data_set_name(projectionShiftedDataHandle, "Batch Projection Shifted Image Data");
+
+		starpu_data_handle_t frequencyDomainTransformArgsHandle = {0};
+		starpu_vector_data_register(&frequencyDomainTransformArgsHandle, -1, 0, currentBatchSize, sizeof(ProjectionShiftBuffer));
+		starpu_data_set_name(frequencyDomainTransformArgsHandle, "Frequency Domain Transform Args");
 
 		starpu_data_handle_t traverseSpacesHandle = {0};
 		starpu_matrix_data_register(&traverseSpacesHandle, -1, 0, computeConstants.R_symmetries.size(), computeConstants.R_symmetries.size(), currentBatchSize, sizeof(RecFourierProjectionTraverseSpace));
@@ -452,12 +464,31 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 			loadProjectionsTask->cl_arg_size = sizeof(loadProjectionArg);
 			loadProjectionsTask->cl_arg_free = 0; // Do not free! (probably default)
 			loadProjectionsTask->handles[0] = amountLoadedHandle;
-			loadProjectionsTask->handles[1] = paddedImagesDataHandle;
+			loadProjectionsTask->handles[1] = projectionDataHandle;
 			loadProjectionsTask->handles[2] = traverseSpacesHandle;
+			loadProjectionsTask->handles[3] = frequencyDomainTransformArgsHandle;
 			loadProjectionsTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
 
 			CHECK_STARPU(starpu_task_submit(loadProjectionsTask));
 		}
+
+		// Shift projections
+		{
+			starpu_task* projectionShiftTask = starpu_task_create();
+			projectionShiftTask->name = "ProjectionShift";
+			projectionShiftTask->cl = &codelets.projection_shift;
+			projectionShiftTask->handles[0] = projectionDataHandle;
+			projectionShiftTask->handles[1] = projectionShiftedDataHandle;
+			projectionShiftTask->handles[2] = frequencyDomainTransformArgsHandle;
+			projectionShiftTask->handles[3] = amountLoadedHandle;
+			projectionShiftTask->cl_arg = &projectionShiftArg;
+			projectionShiftTask->cl_arg_size = sizeof(ProjectionShiftArgs);
+			projectionShiftTask->cl_arg_free = 0;
+			projectionShiftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
+			CHECK_STARPU(starpu_task_submit(projectionShiftTask));
+		}
+		starpu_data_unregister_submit(projectionDataHandle);
+		starpu_data_unregister_submit(frequencyDomainTransformArgsHandle);
 
 		// Compute FFT of padded image data and adjust it (crop, shift, normalize)
 		starpu_data_handle_t fftHandle = {0};
@@ -465,21 +496,21 @@ ProgRecFourierStarPU::ComputeStarPUResult ProgRecFourierStarPU::computeStarPU(
 		starpu_data_set_name(fftHandle, "Batch FFT Data");
 
 		{
-			starpu_task* paddedImageToFftTask = starpu_task_create();
-			paddedImageToFftTask->name = "PaddedImageToFFT";
-			paddedImageToFftTask->cl = &codelets.padded_image_to_fft;
-			paddedImageToFftTask->handles[0] = paddedImagesDataHandle;
-			paddedImageToFftTask->handles[1] = fftHandle;
-			paddedImageToFftTask->handles[2] = fftScratchMemoryHandle;
-			paddedImageToFftTask->handles[3] = amountLoadedHandle;
-			paddedImageToFftTask->cl_arg = &imageToFftArg;
-			paddedImageToFftTask->cl_arg_size = sizeof(PaddedImageToFftArgs);
-			paddedImageToFftTask->cl_arg_free = 0;
-			paddedImageToFftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
-			CHECK_STARPU(starpu_task_submit(paddedImageToFftTask));
+			starpu_task* projectionToFftTask = starpu_task_create();
+			projectionToFftTask->name = "ProjectionToFFT";
+			projectionToFftTask->cl = &codelets.projection_to_fft;
+			projectionToFftTask->handles[0] = projectionShiftedDataHandle;
+			projectionToFftTask->handles[1] = fftHandle;
+			projectionToFftTask->handles[2] = fftScratchMemoryHandle;
+			projectionToFftTask->handles[3] = amountLoadedHandle;
+			projectionToFftTask->cl_arg = &imageToFftArg;
+			projectionToFftTask->cl_arg_size = sizeof(ProjectionToFftArgs);
+			projectionToFftTask->cl_arg_free = 0;
+			projectionToFftTask->synchronous = DEBUG_SYNCHRONOUS_TASKS;
+			CHECK_STARPU(starpu_task_submit(projectionToFftTask));
 		}
 
-		starpu_data_unregister_submit(paddedImagesDataHandle);
+		starpu_data_unregister_submit(projectionShiftedDataHandle);
 
 		{// Submit the actual reconstruction
 			starpu_task* reconstructFftTask = starpu_task_create();
