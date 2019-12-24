@@ -99,7 +99,7 @@ void computeSumSumSqr(const T * __restrict__ in,
     int idOfFirstThreadInWarp = warpId * warpSize;
 #if (CUDART_VERSION >= 9000)
     const unsigned mask = 0xffffffff;
-    if (mask = (__activemask & mask)) {
+    if (mask = (__activemask() & mask)) {
         __match_all_sync(mask, n, &isSameSignalInWarp);
     }
 #else
@@ -129,7 +129,7 @@ void computeSumSumSqr(const T * __restrict__ in,
     if (isSameSignalInWarp) {
         // intrawarp sum
 #if (CUDART_VERSION >= 9000)
-        __syncwarp()
+        __syncwarp();
         for (int offset = 16; offset > 0; offset /= 2) {
             sum += __shfl_down_sync(mask, sum, offset);
             sum2 += __shfl_down_sync(mask, sum2, offset);
